@@ -71,10 +71,10 @@ function openDB() {
   return dbPromise;
 }
 
-function dbPut(key, handle) {
+function dbPut(key, handle, count) {
   return openDB().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(DB_STORE, 'readwrite');
-    tx.objectStore(DB_STORE).put(handle, key);
+    tx.objectStore(DB_STORE).put({ handle, count }, key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
@@ -84,7 +84,12 @@ function dbGet(key) {
   return openDB().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(DB_STORE, 'readonly');
     const req = tx.objectStore(DB_STORE).get(key);
-    req.onsuccess = () => resolve(req.result || null);
+    req.onsuccess = () => {
+      const r = req.result;
+      if (!r) return resolve(null);
+      if (r.handle) return resolve(r); // 新格式 { handle, count }
+      return resolve({ handle: r, count: undefined }); // 旧格式：裸句柄
+    };
     req.onerror = () => reject(req.error);
   }));
 }
@@ -247,15 +252,24 @@ function resetSource() {
   renderAll();
 }
 
-async function applyTarget(idx, handle, silent = false) {
-  const count = await countFiles(handle);
-  state.targets[idx] = { handle, name: handle.name, count };
+async function applyTarget(idx, handle, silent = false, cachedCount) {
+  let t;
+  if (typeof cachedCount === 'number') {
+    t = { handle, name: handle.name, count: cachedCount, key: 'target-' + idx };
+  } else if (cachedCount === null) {
+    t = { handle, name: handle.name, count: null, key: 'target-' + idx }; // 后台计数
+  } else {
+    const count = await countFiles(handle);
+    t = { handle, name: handle.name, count, key: 'target-' + idx };
+  }
+  state.targets[idx] = t;
+  if (t.count === null) refreshTargetCount(t);
+  else persistTarget(t);
   renderTargets();
-  if (!silent) toast(`${slotLabel(idx)} → ${handle.name}（${count} 个文件）`);
+  if (!silent) toast(`${slotLabel(idx)} → ${handle.name}（${t.count} 个文件）`);
 }
 
 async function loadTarget(idx, handle) {
-  await dbPut('target-' + idx, handle);
   await applyTarget(idx, handle);
 }
 
@@ -265,16 +279,47 @@ function clearTarget(idx) {
   renderTargets();
 }
 
-async function applyDel(handle, silent = false) {
-  const count = await countFiles(handle);
-  state.delTarget = { handle, name: handle.name, count };
+async function applyDel(handle, silent = false, cachedCount) {
+  let t;
+  if (typeof cachedCount === 'number') {
+    t = { handle, name: handle.name, count: cachedCount, key: 'del' };
+  } else if (cachedCount === null) {
+    t = { handle, name: handle.name, count: null, key: 'del' }; // 后台计数
+  } else {
+    const count = await countFiles(handle);
+    t = { handle, name: handle.name, count, key: 'del' };
+  }
+  state.delTarget = t;
+  if (t.count === null) refreshTargetCount(t);
+  else persistTarget(t);
   renderTargets();
-  if (!silent) toast(`固定 Del → ${handle.name}（${count} 个文件）`);
+  if (!silent) toast(`固定 Del → ${handle.name}（${t.count} 个文件）`);
 }
 
 async function loadDelTarget(handle) {
-  await dbPut('del', handle);
   await applyDel(handle);
+}
+
+function persistTarget(t) {
+  if (t && t.key) dbPut(t.key, t.handle, t.count).catch(() => {});
+}
+
+function currentTargetFor(t) {
+  if (!t || !t.key) return null;
+  if (t.key === 'del') return state.delTarget === t ? t : null;
+  const idx = parseInt(t.key.slice('target-'.length), 10);
+  return state.targets[idx] === t ? t : null;
+}
+
+async function refreshTargetCount(t) {
+  try {
+    const count = await countFiles(t.handle);
+    if (currentTargetFor(t) === t) {
+      t.count = count;
+      persistTarget(t);
+      renderTargets();
+    }
+  } catch (e) { /* ignore */ }
 }
 
 function clearDelTarget() {
@@ -367,7 +412,7 @@ function updateSlot(slot, t, keyLabel) {
     slot.classList.add('filled');
     slot.classList.remove('empty');
     nameEl.textContent = t.name;
-    countEl.textContent = `${t.count} 个文件`;
+    countEl.textContent = t.count === null ? '…' : `${t.count} 个文件`;
     clearEl.hidden = false;
   } else {
     slot.classList.remove('filled');
@@ -449,7 +494,7 @@ async function moveCurrentTo(target) {
 
     files.splice(state.index, 1);
     if (state.index >= files.length) state.index = Math.max(0, files.length - 1);
-    target.count += 1;
+    if (typeof target.count === 'number') { target.count += 1; persistTarget(target); }
 
     state.undoStack.push({
       fileHandle,
@@ -498,7 +543,7 @@ async function undo() {
     }
 
     const t = findTargetByHandle(rec.targetHandle);
-    if (t) t.count = Math.max(0, t.count - 1);
+    if (t && typeof t.count === 'number') { t.count = Math.max(0, t.count - 1); persistTarget(t); }
 
     if (state.source) {
       state.source.files = await listImages(state.source.handle);
@@ -525,18 +570,17 @@ function reorderTargets(from, to) {
 /* ============================================================
  * 持久化：恢复 / 清空
  * ============================================================ */
-async function applyStored(key, handle) {
+async function applyStored(key, record) {
+  const handle = record.handle;
+  const count = typeof record.count === 'number' ? record.count : null;
   try {
     if (key === 'source') {
-      await dbPut('source', handle);
       await applySource(handle, true);
     } else if (key === 'del') {
-      await dbPut('del', handle);
-      await applyDel(handle, true);
+      await applyDel(handle, true, count);
     } else {
       const idx = parseInt(key.slice('target-'.length), 10);
-      await dbPut(key, handle);
-      await applyTarget(idx, handle, true);
+      await applyTarget(idx, handle, true, count);
     }
   } catch (e) {
     dbDelete(key).catch(() => {});
@@ -548,12 +592,12 @@ async function restoreFromStorage() {
   const keys = ['source', ...Array.from({ length: SORT_COUNT }, (_, i) => 'target-' + i), 'del'];
   try {
     for (const key of keys) {
-      const handle = await dbGet(key);
-      if (!handle || handle.kind !== 'directory') continue;
+      const record = await dbGet(key);
+      if (!record || !record.handle || record.handle.kind !== 'directory') continue;
       let p = 'prompt';
-      try { p = await handle.queryPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
-      if (p === 'granted') await applyStored(key, handle);
-      else pendingHandles.push({ key, handle });
+      try { p = await record.handle.queryPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
+      if (p === 'granted') await applyStored(key, record);
+      else pendingHandles.push({ key, handle: record.handle });
     }
   } catch (e) {
     console.warn('restore error', e);
@@ -572,8 +616,12 @@ async function restorePending() {
         try { p = await handle.requestPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
       }
       try { p = await handle.queryPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
-      if (p === 'granted') await applyStored(key, handle);
-      else pendingHandles.push({ key, handle });
+      if (p === 'granted') {
+        const record = await dbGet(key);
+        await applyStored(key, record || { handle, count: null });
+      } else {
+        pendingHandles.push({ key, handle });
+      }
     } catch (e) {
       dbDelete(key).catch(() => {});
     }
@@ -810,10 +858,10 @@ async function resyncTargetCounts() {
   for (let i = 0; i < SORT_COUNT; i++) {
     const t = state.targets[i];
     if (!t) continue;
-    try { t.count = await countFiles(t.handle); } catch (e) { /* ignore */ }
+    try { t.count = await countFiles(t.handle); persistTarget(t); } catch (e) { /* ignore */ }
   }
   if (state.delTarget) {
-    try { state.delTarget.count = await countFiles(state.delTarget.handle); } catch (e) { /* ignore */ }
+    try { state.delTarget.count = await countFiles(state.delTarget.handle); persistTarget(state.delTarget); } catch (e) { /* ignore */ }
   }
   renderTargets();
 }
