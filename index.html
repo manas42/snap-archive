@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>图片快速分类器 · Snap Archive</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">📁</span>
+      <span class="brand-title">图片快速分类器</span>
+    </div>
+    <div class="source-info" id="sourceInfo" hidden>
+      <span class="source-name" id="sourceName"></span>
+      <button class="btn" id="changeSourceBtn" type="button">更换文件夹</button>
+    </div>
+    <div class="top-actions">
+      <div class="stats" id="stats"></div>
+      <button class="btn danger" id="clearBtn" type="button">清空所有</button>
+    </div>
+  </header>
+
+  <div class="restore-banner" id="restoreBanner" hidden>
+    <span id="restoreText"></span>
+    <button class="btn" id="restoreBtn" type="button">恢复</button>
+  </div>
+
+  <main class="layout">
+    <!-- 左侧预览区：占满尺寸的画布（80% 宽度），空态与预览态为同一区域 -->
+    <section class="preview-pane" id="previewPane">
+      <div class="canvas" id="canvas">
+        <div class="dropzone" id="sourceDrop">
+          <div class="dz-icon">🖼️</div>
+          <div class="dz-title">拖入「待分类」文件夹</div>
+          <div class="dz-hint">或点击选择 · 仅读取该文件夹（不含子文件夹）</div>
+        </div>
+
+        <div class="preview" id="preview" hidden>
+          <div class="preview-stage" id="previewStage"></div>
+          <div class="file-chip" id="fileChip" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右侧目标区：20% 宽度，10 个可排序槽位 + 1 个固定 Del 槽位 -->
+    <aside class="target-pane" id="targetPane"></aside>
+  </main>
+
+  <footer class="hintbar">
+    <span class="hint"><kbd>空格</kbd> / <kbd>→</kbd> 下一张</span>
+    <span class="hint"><kbd>←</kbd> 上一张</span>
+    <span class="hint"><kbd>0</kbd>–<kbd>9</kbd> 移入对应文件夹</span>
+    <span class="hint"><kbd>Del</kbd> 移入固定文件夹</span>
+    <span class="hint"><kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销</span>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
