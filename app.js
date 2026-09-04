@@ -8,12 +8,19 @@
 
 const SUPPORTED_EXT = new Set(['bmp', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'webm', 'avif']);
 const VIDEO_EXT = new Set(['webm']);
-const SORT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-const SORT_COUNT = 10;
+const SORT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']; // 前 10 个槽位才有数字快捷键
+const SORT_COUNT = 20; // 目标槽位总数（第 11–20 个无数字快捷键，仅鼠标点击分类）
 const MAX_UNDO = 50;
 const REORDER_TYPE = 'application/x-snap-sort';
 const DB_NAME = 'snap-archive';
 const DB_STORE = 'handles';
+
+function keyLabelFor(i) {
+  return i < SORT_KEYS.length ? SORT_KEYS[i] : '';
+}
+function slotLabel(i) {
+  return i < SORT_KEYS.length ? `目标 ${SORT_KEYS[i]}` : `槽位 ${i}`;
+}
 
 const state = {
   source: null,                      // { handle, name, files: FileSystemFileHandle[] }
@@ -244,7 +251,7 @@ async function applyTarget(idx, handle, silent = false) {
   const count = await countFiles(handle);
   state.targets[idx] = { handle, name: handle.name, count };
   renderTargets();
-  if (!silent) toast(`目标 ${SORT_KEYS[idx]} → ${handle.name}（${count} 个文件）`);
+  if (!silent) toast(`${slotLabel(idx)} → ${handle.name}（${count} 个文件）`);
 }
 
 async function loadTarget(idx, handle) {
@@ -350,7 +357,12 @@ function updateSlot(slot, t, keyLabel) {
   const countEl = slot.querySelector('.slot-count');
   const clearEl = slot.querySelector('.slot-clear');
   const keyEl = slot.querySelector('.key');
-  keyEl.textContent = keyLabel;
+  if (keyLabel) {
+    keyEl.hidden = false;
+    keyEl.textContent = keyLabel;
+  } else {
+    keyEl.hidden = true;
+  }
   if (t) {
     slot.classList.add('filled');
     slot.classList.remove('empty');
@@ -368,7 +380,7 @@ function updateSlot(slot, t, keyLabel) {
 
 function renderTargets() {
   for (let i = 0; i < SORT_COUNT; i++) {
-    updateSlot(slotEls[i], state.targets[i], SORT_KEYS[i]);
+    updateSlot(slotEls[i], state.targets[i], keyLabelFor(i));
     slotEls[i].draggable = !!state.targets[i];
   }
   updateSlot(delSlotEl, state.delTarget, 'Del');
@@ -506,9 +518,7 @@ async function undo() {
 function reorderTargets(from, to) {
   if (from === to) return;
   const arr = state.targets;
-  const [item] = arr.splice(from, 1);
-  const insertAt = from < to ? to - 1 : to;
-  arr.splice(insertAt, 0, item);
+  [arr[from], arr[to]] = [arr[to], arr[from]]; // 直接互换：把已有文件夹放到指定槽位
   renderTargets();
 }
 
@@ -535,7 +545,7 @@ async function applyStored(key, handle) {
 }
 
 async function restoreFromStorage() {
-  const keys = ['source', ...SORT_KEYS.map((_, i) => 'target-' + i), 'del'];
+  const keys = ['source', ...Array.from({ length: SORT_COUNT }, (_, i) => 'target-' + i), 'del'];
   try {
     for (const key of keys) {
       const handle = await dbGet(key);
@@ -736,26 +746,26 @@ function wireDelSlot(slot) {
 function buildSlots() {
   const title = document.createElement('div');
   title.className = 'pane-title';
-  title.textContent = '目标文件夹（单击分类 · 拖入指定）';
+  title.textContent = '目标文件夹（最多 20 个 · 0–9 有快捷键）';
   targetPane.appendChild(title);
 
-  SORT_KEYS.forEach((key, i) => {
-    const slot = buildSlot(key, false);
-    wireSortSlot(slot, i);
-    targetPane.appendChild(slot);
-    slotEls[i] = slot;
-  });
+  delSlotEl = buildSlot('Del', true);
+  wireDelSlot(delSlotEl);
+  targetPane.appendChild(delSlotEl);
 
   const sep = document.createElement('hr');
   sep.className = 'del-sep';
   targetPane.appendChild(sep);
 
-  delSlotEl = buildSlot('Del', true);
-  wireDelSlot(delSlotEl);
-  targetPane.appendChild(delSlotEl);
+  for (let i = 0; i < SORT_COUNT; i++) {
+    const slot = buildSlot(keyLabelFor(i), false);
+    wireSortSlot(slot, i);
+    targetPane.appendChild(slot);
+    slotEls[i] = slot;
+  }
 }
 
-/* 批量拖入到右侧空白处 → 依次填充 0–9 槽位 */
+/* 批量拖入到右侧空白处 → 依次填充 0–19 槽位 */
 targetPane.addEventListener('dragover', (e) => { e.preventDefault(); });
 targetPane.addEventListener('drop', async (e) => {
   if (e.target.closest('.slot')) return;
