@@ -82,6 +82,14 @@ body {
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .btn.danger { color: var(--danger); }
 .btn.danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(248, 81, 73, .1); }
+.btn:disabled,
+.btn:disabled:hover {
+  opacity: .45;
+  cursor: default;
+  border-color: var(--border-strong);
+  color: var(--text);
+  background: var(--bg-elevated);
+}
 
 /* ---------- 恢复横幅 ---------- */
 .restore-banner {
@@ -95,6 +103,28 @@ body {
   color: var(--warn);
   font-size: 13px;
   flex: 0 0 auto;
+}
+.restore-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.restore-text strong {
+  font-weight: 700;
+  color: var(--text);
+}
+.restore-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+.btn.dismiss { color: var(--text-muted); }
+.btn.dismiss:hover {
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+  background: transparent;
 }
 
 /* ---------- 主体布局 ---------- */

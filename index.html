@@ -18,13 +18,18 @@
     </div>
     <div class="top-actions">
       <div class="stats" id="stats"></div>
-      <button class="btn danger" id="clearBtn" type="button">清空所有</button>
+      <button class="btn" id="undoBtn" type="button" title="撤销上一次移动（Ctrl+Z）" disabled>↶ 撤销</button>
+      <button class="btn" id="clearTargetsBtn" type="button">清空目标</button>
+      <button class="btn danger" id="clearBtn" type="button" title="清空浏览器中保存的全部文件夹记录并重置界面（磁盘文件不受影响）">清除缓存</button>
     </div>
   </header>
 
   <div class="restore-banner" id="restoreBanner" hidden>
-    <span id="restoreText"></span>
-    <button class="btn" id="restoreBtn" type="button">恢复</button>
+    <span class="restore-text" id="restoreText"></span>
+    <div class="restore-actions">
+      <button class="btn" id="restoreBtn" type="button">恢复</button>
+      <button class="btn dismiss" id="dismissRestoreBtn" type="button">暂不</button>
+    </div>
   </div>
 
   <main class="layout">

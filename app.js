@@ -31,7 +31,7 @@ const state = {
   undoStack: [],
 };
 
-let pendingHandles = [];
+let pendingHandles = []; // 待恢复的文件夹句柄（存储中有记录、等待用户确认恢复的）
 let busy = false;
 let toastTimer = null;
 
@@ -41,9 +41,12 @@ const sourceInfo = $('sourceInfo');
 const sourceName = $('sourceName');
 const changeSourceBtn = $('changeSourceBtn');
 const clearBtn = $('clearBtn');
+const clearTargetsBtn = $('clearTargetsBtn');
+const undoBtn = $('undoBtn');
 const restoreBanner = $('restoreBanner');
 const restoreText = $('restoreText');
 const restoreBtn = $('restoreBtn');
+const dismissRestoreBtn = $('dismissRestoreBtn');
 const canvas = $('canvas');
 const sourceDrop = $('sourceDrop');
 const preview = $('preview');
@@ -444,6 +447,12 @@ function renderAll() {
   }
   renderPreview();
   renderTargets();
+  updateUndoState();
+}
+
+// 撤销栈为空时禁用右上角「撤销」按钮（与 Ctrl+Z 同一 undo 栈）
+function updateUndoState() {
+  undoBtn.disabled = state.undoStack.length === 0;
 }
 
 /* ============================================================
@@ -589,18 +598,18 @@ async function applyStored(key, record) {
 }
 
 async function restoreFromStorage() {
+  // 打开页面时不静默恢复任何文件夹：仅扫描存储里有哪些记录，
+  // 收集进 pendingHandles 并弹出顶部提示条，等用户点「恢复」再真正恢复。
   const keys = ['source', ...Array.from({ length: SORT_COUNT }, (_, i) => 'target-' + i), 'del'];
+  pendingHandles = [];
   try {
     for (const key of keys) {
       const record = await dbGet(key);
       if (!record || !record.handle || record.handle.kind !== 'directory') continue;
-      let p = 'prompt';
-      try { p = await record.handle.queryPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
-      if (p === 'granted') await applyStored(key, record);
-      else pendingHandles.push({ key, handle: record.handle });
+      pendingHandles.push({ key, handle: record.handle });
     }
   } catch (e) {
-    console.warn('restore error', e);
+    console.warn('restore scan error', e);
   }
   updateRestoreBanner();
 }
@@ -608,6 +617,8 @@ async function restoreFromStorage() {
 async function restorePending() {
   const list = pendingHandles;
   pendingHandles = [];
+  let ok = 0;
+  const skipped = [];
   for (const { key, handle } of list) {
     try {
       let p = 'prompt';
@@ -619,25 +630,63 @@ async function restorePending() {
       if (p === 'granted') {
         const record = await dbGet(key);
         await applyStored(key, record || { handle, count: null });
+        ok++;
       } else {
-        pendingHandles.push({ key, handle });
+        // 授权被拒：句柄仍有效则保留记录（下次打开可再问），本次跳过
+        skipped.push(handle.name);
       }
     } catch (e) {
-      dbDelete(key).catch(() => {});
+      skipped.push(handle.name);
+      dbDelete(key).catch(() => {}); // 句柄已失效（如文件夹被删除），清掉记录
     }
   }
   updateRestoreBanner();
-  if (pendingHandles.length === 0) toast('已恢复上次的文件夹');
-  else toast(`仍有 ${pendingHandles.length} 个文件夹未授权`, 'warn');
+  if (skipped.length === 0) {
+    if (ok > 0) toast(`已恢复上次的会话（${ok} 个文件夹）`);
+  } else if (ok > 0) {
+    toast(`已恢复 ${ok} 个文件夹；${skipped.length} 个未授权：${skipped.join('、')}`, 'warn');
+  } else {
+    toast(`未恢复：${skipped.join('、')} 授权被拒绝或不可用`, 'warn');
+  }
 }
 
 function updateRestoreBanner() {
   const n = pendingHandles.length;
   restoreBanner.hidden = n === 0;
-  if (n > 0) {
-    const names = pendingHandles.map((p) => p.handle.name).join('、');
-    restoreText.textContent = `上次有 ${n} 个文件夹需要重新授权：${names}`;
+  if (n === 0) return;
+  restoreText.textContent = '';
+  // 提示条只点出源文件夹名，其余目标文件夹不逐个列出
+  const src = pendingHandles.find((p) => p.key === 'source');
+  if (src) {
+    restoreText.append('检测到上次会话：');
+    const strong = document.createElement('strong');
+    strong.textContent = src.handle.name;
+    restoreText.append(strong);
+    restoreText.append('，恢复上次的文件夹配置？');
+  } else {
+    restoreText.textContent = `检测到上次保存的 ${n} 个文件夹，是否恢复？`;
   }
+}
+
+function dismissRestore() {
+  pendingHandles = [];
+  updateRestoreBanner();
+}
+
+// 清空全部目标文件夹（20 个普通槽位 + 固定 Del 槽），源文件夹与撤销栈保留
+function clearAllTargets() {
+  let had = false;
+  for (let i = 0; i < SORT_COUNT; i++) {
+    if (state.targets[i]) had = true;
+    state.targets[i] = null;
+    dbDelete('target-' + i).catch(() => {});
+  }
+  if (state.delTarget) had = true;
+  state.delTarget = null;
+  dbDelete('del').catch(() => {});
+  renderTargets();
+  if (had) toast('已清空全部目标文件夹');
+  else toast('当前没有目标文件夹', 'warn');
 }
 
 async function clearAll() {
@@ -649,8 +698,7 @@ async function clearAll() {
   state.undoStack = [];
   if (state.currentUrl) { URL.revokeObjectURL(state.currentUrl); state.currentUrl = null; }
   previewStage.innerHTML = '';
-  pendingHandles = [];
-  updateRestoreBanner();
+  dismissRestore();
   renderAll();
   toast('已清空所有配置（磁盘文件未改动）');
 }
@@ -877,7 +925,10 @@ window.addEventListener('focus', resyncTargetCounts);
 buildSlots();
 wireSourceCanvas();
 changeSourceBtn.addEventListener('click', resetSource);
+undoBtn.addEventListener('click', () => undo());
+clearTargetsBtn.addEventListener('click', clearAllTargets);
 clearBtn.addEventListener('click', clearAll);
 restoreBtn.addEventListener('click', restorePending);
+dismissRestoreBtn.addEventListener('click', dismissRestore);
 renderAll();
 restoreFromStorage();
