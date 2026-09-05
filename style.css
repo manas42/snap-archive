@@ -241,6 +241,30 @@ body {
   animation: tri-spin .8s linear infinite;
 }
 @keyframes tri-spin { to { transform: rotate(360deg); } }
+
+/* ---------- 移动飞入动画 ---------- */
+.fly-ghost {
+  position: fixed;
+  z-index: 999;
+  margin: 0;
+  object-fit: contain;
+  pointer-events: none;
+  border-radius: 6px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .5);
+  transition: transform .3s cubic-bezier(.3, .7, .2, 1), opacity .3s ease;
+  will-change: transform, opacity;
+  transform-origin: center;
+}
+
+/* 目标槽位接收图片时的闪光提示 */
+.slot-flash {
+  animation: slot-flash .55s ease-out;
+}
+@keyframes slot-flash {
+  0% { background: rgba(79, 140, 255, .45); border-color: var(--accent); }
+  40% { background: rgba(79, 140, 255, .22); }
+  100% { background: var(--bg-panel); }
+}
 .preview-stage img,
 .preview-stage video {
   max-width: 100%;
@@ -294,7 +318,7 @@ body {
   border: 2px dashed var(--border-strong);
   border-radius: var(--radius);
   padding: 8px 10px;
-  cursor: pointer;
+  cursor: default;
   background: var(--bg-panel);
   transition: border-color .15s, background .15s, opacity .15s;
   user-select: none;
@@ -331,6 +355,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  cursor: pointer;
+}
+/* 右侧操作区：不响应「移动到该文件夹」，仅承载 ⇄ / ▦ / ✕ 与快捷键角标 */
+.slot-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .slot-name {
   font-size: 12px;

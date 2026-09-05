@@ -838,6 +838,9 @@ async function moveCurrentTo(target) {
     const destName = await uniqueName(target.handle, originalName);
     await moveFile(state.source.handle, fileHandle, target.handle, destName);
 
+    // 移动成功后再启动纯视觉动画；不 await、不阻塞下方立即切图
+    flyToSlot(mainMediaEl(), slotElForTarget(target));
+
     files.splice(state.index, 1);
     if (state.index >= files.length) state.index = Math.max(0, files.length - 1);
     if (typeof target.count === 'number') { target.count += 1; persistTarget(target); }
@@ -911,6 +914,68 @@ function reorderTargets(from, to) {
   const arr = state.targets;
   [arr[from], arr[to]] = [arr[to], arr[from]]; // 直接互换：把已有文件夹放到指定槽位
   renderTargets();
+}
+
+/* ============================================================
+ * 移动飞入动画：克隆当前主图，缩小飞向目标槽位
+ * ============================================================ */
+// 目标对象 -> 对应槽位 DOM 元素（用于动画落点）
+function slotElForTarget(t) {
+  if (!t) return null;
+  if (t.key === 'del') return delSlotEl;
+  const idx = parseInt(t.key.slice('target-'.length), 10);
+  return Number.isInteger(idx) && slotEls[idx] ? slotEls[idx] : null;
+}
+
+// 当前主画面媒体元素（中间格子里已带 src 的那个）
+function mainMediaEl() {
+  const cell = triCells && triCells.M;
+  if (!cell || !cell.firstElementChild) return null;
+  const el = cell.firstElementChild;
+  return el.src ? el : null;
+}
+
+// 目标槽位闪光（与飞入动画同步，提示落点）
+function flashSlot(slotEl) {
+  if (!slotEl) return;
+  slotEl.classList.remove('slot-flash');
+  void slotEl.offsetWidth; // 强制重排以重启动画
+  slotEl.classList.add('slot-flash');
+  setTimeout(() => slotEl.classList.remove('slot-flash'), 620);
+}
+
+function flyToSlot(sourceEl, slotEl) {
+  if (!sourceEl || !slotEl) return;
+  flashSlot(slotEl); // 落点闪光与动画同时开始
+  const s = sourceEl.getBoundingClientRect();
+  const t = slotEl.getBoundingClientRect();
+  if (s.width < 4 || s.height < 4 || t.width < 4 || t.height < 4) return;
+  const ghost = sourceEl.cloneNode(true);
+  if (ghost.tagName === 'VIDEO') {
+    ghost.muted = true;
+    ghost.loop = true;
+    ghost.controls = false;
+    ghost.playsInline = true;
+    try { const p = ghost.play(); if (p) p.catch(() => {}); } catch (e) { /* noop */ }
+  }
+  const endScale = Math.min(t.width / s.width, t.height / s.height);
+  const startScale = Math.max(endScale * 1.5, .28);
+  ghost.className = 'fly-ghost';
+  ghost.style.left = s.left + 'px';
+  ghost.style.top = s.top + 'px';
+  ghost.style.width = s.width + 'px';
+  ghost.style.height = s.height + 'px';
+  // 起点即已是小残影（不整图盖住主区），随后平移收窄飞入槽位
+  ghost.style.transform = `scale(${startScale})`;
+  ghost.style.opacity = '.9';
+  document.body.appendChild(ghost);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const dx = (t.left + t.width / 2) - (s.left + s.width / 2);
+    const dy = (t.top + t.height / 2) - (s.top + s.height / 2);
+    ghost.style.transform = `translate(${dx}px, ${dy}px) scale(${endScale})`;
+    ghost.style.opacity = '.1';
+  }));
+  setTimeout(() => ghost.remove(), 420);
 }
 
 /* ============================================================
@@ -1084,10 +1149,12 @@ function buildSlot(keyLabel, isDel) {
       <div class="slot-name">${isDel ? '拖入固定文件夹' : '拖入文件夹'}</div>
       <div class="slot-count">—</div>
     </div>
-    <span class="key">${keyLabel}</span>
-    <button class="slot-swap" type="button" title="与源文件夹交换" hidden>⇄</button>
-    <button class="slot-grid" type="button" title="图集预览" hidden>▦</button>
-    <button class="slot-clear" type="button" title="移除该文件夹">✕</button>`;
+    <div class="slot-actions">
+      <span class="key">${keyLabel}</span>
+      <button class="slot-swap" type="button" title="与源文件夹交换" hidden>⇄</button>
+      <button class="slot-grid" type="button" title="图集预览" hidden>▦</button>
+      <button class="slot-clear" type="button" title="移除该文件夹">✕</button>
+    </div>`;
   return slot;
 }
 
@@ -1108,8 +1175,9 @@ function wireSortSlot(slot, i) {
   const clearEl = slot.querySelector('.slot-clear');
   clearEl.addEventListener('click', (e) => { e.stopPropagation(); clearTarget(i); });
 
-  // 单击：已填 → 分类；未填 → 选择文件夹
-  slot.addEventListener('click', async () => {
+  // 单击（仅卡牌主体区域）：已填 → 分类；未填 → 选择文件夹。
+  // 右侧操作区（快捷键角标 + ⇄/▦/✕）不响应分类，避免误触移动
+  slot.querySelector('.slot-body').addEventListener('click', async () => {
     if (state.targets[i]) await moveCurrentTo(state.targets[i]);
     else await openPickerFor(i);
   });
@@ -1158,7 +1226,7 @@ function wireDelSlot(slot) {
   const clearEl = slot.querySelector('.slot-clear');
   clearEl.addEventListener('click', (e) => { e.stopPropagation(); clearDelTarget(); });
 
-  slot.addEventListener('click', async () => {
+  slot.querySelector('.slot-body').addEventListener('click', async () => {
     if (state.delTarget) await moveCurrentTo(state.delTarget);
     else {
       try {
