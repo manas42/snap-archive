@@ -6,8 +6,8 @@
  * 文件夹句柄持久化到 IndexedDB（localStorage 只能存字符串，无法存句柄）
  * ============================================================ */
 
-const SUPPORTED_EXT = new Set(['bmp', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'webm', 'avif']);
-const VIDEO_EXT = new Set(['webm']);
+const SUPPORTED_EXT = new Set(['bmp', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'webm', 'mp4', 'avif']);
+const VIDEO_EXT = new Set(['webm', 'mp4']);
 const SORT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']; // 前 10 个槽位才有数字快捷键
 const SORT_COUNT = 20; // 目标槽位总数（第 11–20 个无数字快捷键，仅鼠标点击分类）
 const MAX_UNDO = 50;
@@ -15,11 +15,16 @@ const REORDER_TYPE = 'application/x-snap-sort';
 const DB_NAME = 'snap-archive';
 const DB_STORE = 'handles';
 const SORT_PREF_KEY = 'snap-archive-sort';
+const FILTER_PREF_KEY = 'snap-archive-filter';
 const SORT_NEW_FIRST = 'mtime-desc'; // 新到旧（默认）
 const SORT_OLD_FIRST = 'mtime-asc';  // 旧到新
 let sourceSortMode = SORT_NEW_FIRST;
 try { sourceSortMode = localStorage.getItem(SORT_PREF_KEY) || SORT_NEW_FIRST; } catch (e) { /* noop */ }
 if (sourceSortMode !== SORT_NEW_FIRST && sourceSortMode !== SORT_OLD_FIRST) sourceSortMode = SORT_NEW_FIRST;
+// 源文件类型过滤：all=图片+视频，image=仅图片，video=仅视频
+let sourceFilter = 'all';
+try { sourceFilter = localStorage.getItem(FILTER_PREF_KEY) || 'all'; } catch (e) { /* noop */ }
+if (!['all', 'image', 'video'].includes(sourceFilter)) sourceFilter = 'all';
 
 function keyLabelFor(i) {
   return i < SORT_KEYS.length ? SORT_KEYS[i] : '';
@@ -72,6 +77,7 @@ const gridPageInfo = $('gridPageInfo');
 const gridTitle = $('gridTitle');
 const gridSortNew = $('gridSortNew');
 const gridSortOld = $('gridSortOld');
+const filterSelect = $('filterSelect');
 
 const slotEls = new Array(SORT_COUNT).fill(null);
 let delSlotEl = null;
@@ -150,11 +156,17 @@ function toast(msg, type = 'success') {
 /* ============================================================
  * 目录 / 文件操作
  * ============================================================ */
-async function listImages(dirHandle) {
+// filterMode: 'all'（默认）｜'image'（仅图片）｜'video'（仅视频）
+async function listImages(dirHandle, filterMode = 'all') {
   const files = [];
   for await (const entry of dirHandle.values()) {
     if (entry.kind !== 'file') continue;
-    if (SUPPORTED_EXT.has(extOf(entry.name))) files.push(entry);
+    const ext = extOf(entry.name);
+    if (!SUPPORTED_EXT.has(ext)) continue;
+    const isVideo = VIDEO_EXT.has(ext);
+    if (filterMode === 'image' && isVideo) continue;
+    if (filterMode === 'video' && !isVideo) continue;
+    files.push(entry);
   }
   return sortFiles(files, sourceSortMode);
 }
@@ -263,14 +275,14 @@ async function moveFile(sourceHandle, fileHandle, targetHandle, destName) {
  * 加载 / 应用 源与目标文件夹
  * ============================================================ */
 async function applySource(handle, silent = false) {
-  const files = await listImages(handle);
+  const files = await listImages(handle, sourceFilter);
   state.source = { handle, name: handle.name, files };
   state.index = 0;
   state.undoStack = [];
   renderAll();
   if (!silent) {
-    if (files.length === 0) toast('该文件夹中没有支持的图片文件', 'warn');
-    else toast(`已载入 ${files.length} 张图片`);
+    if (files.length === 0) toast(`没有符合当前过滤的${sourceFilter === 'video' ? '视频' : sourceFilter === 'image' ? '图片' : '文件'}`, 'warn');
+    else toast(`已载入 ${files.length} ${sourceFilter === 'video' ? '个视频' : sourceFilter === 'image' ? '张图片' : '个文件'}`);
   }
 }
 
@@ -290,6 +302,33 @@ function resetSource() {
   previewStage.innerHTML = '';
   dbDelete('source').catch(() => {});
   renderAll();
+}
+
+// 切换源文件类型过滤（图片 / 视频 / 全部）：重扫目录并按偏好排序，
+// 当前文件若仍符合新过滤则保留定位，否则回到第一张
+async function setSourceFilter(mode) {
+  if (!['all', 'image', 'video'].includes(mode)) return;
+  sourceFilter = mode;
+  try { localStorage.setItem(FILTER_PREF_KEY, mode); } catch (e) { /* noop */ }
+  if (filterSelect) filterSelect.value = mode;
+  if (!state.source) return;
+  const cur = state.source.files[state.index] || null;
+  try {
+    state.source.files = await listImages(state.source.handle, sourceFilter);
+    if (cur) {
+      const ni = state.source.files.indexOf(cur);
+      state.index = ni >= 0 ? ni : 0;
+    } else {
+      state.index = 0;
+    }
+    revokePreviewUrls();
+    renderAll();
+    if (state.source.files.length === 0) {
+      toast('过滤后没有符合条件的文件', 'warn');
+    }
+  } catch (e) {
+    toast('切换过滤失败：' + e.message, 'error');
+  }
 }
 
 async function applyTarget(idx, handle, silent = false, cachedCount) {
@@ -551,14 +590,25 @@ async function renderGridPage() {
     const gi = start + j;
     const fig = document.createElement('figure');
     fig.className = 'grid-item';
-    const img = document.createElement('img');
-    img.alt = fh.name;
+    // 视频格用 video 元素显示首帧缩略（静音、不自动播放）
+    const isVideo = VIDEO_EXT.has(extOf(fh.name));
+    const media = isVideo ? document.createElement('video') : document.createElement('img');
+    media.alt = fh.name;
+    if (isVideo) {
+      media.muted = true;
+      media.playsInline = true;
+      media.preload = 'metadata';
+      // 元数据就绪后回卷到首帧，让缩略图显示第一帧画面
+      media.addEventListener('loadedmetadata', () => {
+        try { media.currentTime = 0; } catch (e) { /* noop */ }
+      }, { once: true });
+    }
     try {
       const file = await fh.getFile();
       const url = URL.createObjectURL(file);
       gridUrls.push(url);
-      img.src = url;
-      fig.appendChild(img);
+      media.src = url;
+      fig.appendChild(media);
       const badge = document.createElement('span');
       badge.className = 'grid-index';
       badge.textContent = String(gi + 1);
@@ -637,6 +687,14 @@ function getOrCreatePreviewMedia(handle) {
   const isVideo = VIDEO_EXT.has(extOf(handle.name));
   const el = isVideo ? document.createElement('video') : document.createElement('img');
   el.draggable = false;
+  if (isVideo) {
+    el.muted = true;
+    el.playsInline = true;
+    // 非主图位置不自动播放；等元数据就绪后回卷到首帧（只显示第一帧）
+    el.addEventListener('loadedmetadata', () => {
+      try { el.currentTime = 0; } catch (e) { /* noop */ }
+    }, { once: true });
+  }
   rec = { handle, el, url: null, loading: false, failed: false };
   previewMediaCache.set(handle, rec);
   return rec;
@@ -652,10 +710,16 @@ async function loadPreviewMedia(rec) {
     rec.url = url;
     rec.el.src = url;
     if (rec.el.tagName === 'VIDEO') {
-      rec.el.muted = true;
       rec.el.loop = true;
-      rec.el.preload = 'auto';
-      if (rec.el.closest('.tri-main')) { try { await rec.el.play(); } catch (e) { /* noop */ } }
+      const inMain = !!rec.el.closest('.tri-main');
+      rec.el.preload = inMain ? 'auto' : 'metadata'; // 侧栏只取首帧，不整段预载
+      if (inMain) {
+        // 主图：保留自动播放
+        try { await rec.el.play(); } catch (e) { /* noop */ }
+      } else {
+        // 侧栏：不自动播放，只停在首帧
+        try { rec.el.currentTime = 0; } catch (e) { /* noop */ }
+      }
     }
   } catch (e) {
     rec.failed = true; // 文件不可读（可能已被移走）→ 该格留空
@@ -672,8 +736,9 @@ function applyRole(rec, role) {
     el.controls = true;
     if (rec.url) { try { el.play().catch(() => {}); } catch (e) { /* noop */ } }
   } else {
+    // 切回侧栏：停播并回到首帧
     el.controls = false;
-    el.pause();
+    try { el.pause(); el.currentTime = 0; } catch (e) { /* noop */ }
   }
 }
 
@@ -895,7 +960,7 @@ async function undo() {
     if (t && typeof t.count === 'number') { t.count = Math.max(0, t.count - 1); persistTarget(t); }
 
     if (state.source) {
-      state.source.files = await listImages(state.source.handle);
+      state.source.files = await listImages(state.source.handle, sourceFilter);
       const idx = state.source.files.findIndex((f) => f.name === rec.originalName);
       if (idx >= 0) state.index = idx;
     }
@@ -1358,6 +1423,8 @@ gridPrev.addEventListener('click', async () => { if (gridPage > 0) { gridPage--;
 gridNext.addEventListener('click', async () => { if (gridPage < gridPageCount() - 1) { gridPage++; await renderGridPage(); } });
 gridSortNew.addEventListener('click', () => switchGridSort(SORT_NEW_FIRST));
 gridSortOld.addEventListener('click', () => switchGridSort(SORT_OLD_FIRST));
+filterSelect.addEventListener('change', () => setSourceFilter(filterSelect.value));
+filterSelect.value = sourceFilter;
 updateGridSortUI();
 renderAll();
 restoreFromStorage();

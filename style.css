@@ -82,6 +82,18 @@ body {
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .btn.danger { color: var(--danger); }
 .btn.danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(248, 81, 73, .1); }
+.filter-select {
+  flex: 0 0 auto;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.filter-select:hover { border-color: var(--accent); }
+.filter-select option { background: var(--bg-panel); color: var(--text); }
 .btn:disabled,
 .btn:disabled:hover {
   opacity: .45;
@@ -521,21 +533,24 @@ kbd {
   cursor: pointer;
 }
 .grid-item:hover { border-color: var(--accent); }
-.grid-item img {
+.grid-item img,
+.grid-item video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
   transition: transform .15s ease;
 }
-.grid-item:hover img { transform: scale(1.06); }
+.grid-item:hover img,
+.grid-item:hover video { transform: scale(1.06); }
 /* 只读预览（目标槽位图集）：不暗示可点击 */
 .grid.readonly .grid-item,
 .grid.readonly .grid-item:hover {
   cursor: default;
   border-color: var(--border);
 }
-.grid.readonly .grid-item:hover img { transform: none; }
+.grid.readonly .grid-item:hover img,
+.grid.readonly .grid-item:hover video { transform: none; }
 .grid-item.broken {
   display: flex;
   align-items: center;
