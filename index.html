@@ -15,6 +15,7 @@
     <div class="source-info" id="sourceInfo" hidden>
       <span class="source-name" id="sourceName"></span>
       <button class="btn" id="changeSourceBtn" type="button">更换文件夹</button>
+      <button class="btn" id="gridBtn" type="button">图集</button>
     </div>
     <div class="top-actions">
       <div class="stats" id="stats"></div>
@@ -62,6 +63,31 @@
   </footer>
 
   <div class="toast" id="toast" hidden></div>
+
+  <!-- 图集模态框：5×4 栅格分页浏览源文件夹图片 -->
+  <div class="modal" id="gridModal" hidden>
+    <div class="modal-overlay" id="gridOverlay">
+      <div class="modal-card">
+        <div class="modal-head">
+          <span class="modal-title" id="gridTitle">图集</span>
+          <button class="btn modal-close" id="gridClose" type="button" title="关闭（Esc）">✕</button>
+        </div>
+        <div class="modal-body grid" id="gridBox"></div>
+        <div class="modal-foot">
+          <div class="grid-sort">
+            <span class="sort-label">排序</span>
+            <button class="btn grid-sort-btn" id="gridSortNew" type="button" title="按修改时间：最新在前">新 → 旧</button>
+            <button class="btn grid-sort-btn" id="gridSortOld" type="button" title="按修改时间：最早在前">旧 → 新</button>
+          </div>
+          <div class="foot-nav">
+            <button class="btn" id="gridPrev" type="button">‹ 上一页</button>
+            <span class="page-info" id="gridPageInfo"></span>
+            <button class="btn" id="gridNext" type="button">下一页 ›</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

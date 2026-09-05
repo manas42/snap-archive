@@ -14,6 +14,12 @@ const MAX_UNDO = 50;
 const REORDER_TYPE = 'application/x-snap-sort';
 const DB_NAME = 'snap-archive';
 const DB_STORE = 'handles';
+const SORT_PREF_KEY = 'snap-archive-sort';
+const SORT_NEW_FIRST = 'mtime-desc'; // 新到旧（默认）
+const SORT_OLD_FIRST = 'mtime-asc';  // 旧到新
+let sourceSortMode = SORT_NEW_FIRST;
+try { sourceSortMode = localStorage.getItem(SORT_PREF_KEY) || SORT_NEW_FIRST; } catch (e) { /* noop */ }
+if (sourceSortMode !== SORT_NEW_FIRST && sourceSortMode !== SORT_OLD_FIRST) sourceSortMode = SORT_NEW_FIRST;
 
 function keyLabelFor(i) {
   return i < SORT_KEYS.length ? SORT_KEYS[i] : '';
@@ -55,6 +61,17 @@ const fileChip = $('fileChip');
 const targetPane = $('targetPane');
 const stats = $('stats');
 const toastEl = $('toast');
+const gridBtn = $('gridBtn');
+const gridModal = $('gridModal');
+const gridOverlay = $('gridOverlay');
+const gridClose = $('gridClose');
+const gridBox = $('gridBox');
+const gridPrev = $('gridPrev');
+const gridNext = $('gridNext');
+const gridPageInfo = $('gridPageInfo');
+const gridTitle = $('gridTitle');
+const gridSortNew = $('gridSortNew');
+const gridSortOld = $('gridSortOld');
 
 const slotEls = new Array(SORT_COUNT).fill(null);
 let delSlotEl = null;
@@ -138,6 +155,25 @@ async function listImages(dirHandle) {
   for await (const entry of dirHandle.values()) {
     if (entry.kind !== 'file') continue;
     if (SUPPORTED_EXT.has(extOf(entry.name))) files.push(entry);
+  }
+  return sortFiles(files, sourceSortMode);
+}
+
+// 按修改时间排序：mtime-desc=新到旧（默认），mtime-asc=旧到新；同时间按文件名自然序稳定排序
+async function sortFiles(files, mode) {
+  if (files.length <= 1) return files;
+  if (mode === SORT_NEW_FIRST || mode === SORT_OLD_FIRST) {
+    const metas = await Promise.all(files.map(async (f) => {
+      let t = 0;
+      try { t = (await f.getFile()).lastModified; } catch (e) { /* noop */ }
+      return { f, t };
+    }));
+    const dir = mode === SORT_OLD_FIRST ? 1 : -1;
+    metas.sort((a, b) => {
+      if (a.t !== b.t) return (a.t - b.t) * dir;
+      return a.f.name.localeCompare(b.f.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    return metas.map((m) => m.f);
   }
   files.sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -345,6 +381,163 @@ async function loadBatch(dirs, startIdx = 0) {
 }
 
 /* ============================================================
+ * 交换：目标槽位 ⇄ 源文件夹
+ * ============================================================ */
+// 通用：把某个目标的 handle 提升为新源；返回旧源 handle（供放回槽位）；失败返回 null
+async function promoteToSource(t) {
+  if (busy) { toast('正在处理，请稍候', 'warn'); return null; }
+  if (!state.source) { toast('请先载入源文件夹', 'warn'); return null; }
+  if (!t) { toast('该槽位没有文件夹', 'warn'); return null; }
+  const oldHandle = state.source.handle;
+  try {
+    await dbPut('source', t.handle); // 更新持久化记录
+    await applySource(t.handle, true); // 静默载入：重置撤销栈并渲染
+    return oldHandle;
+  } catch (e) {
+    toast('交换失败：' + e.message, 'error');
+    return null;
+  }
+}
+
+async function swapSourceWithSort(idx) {
+  const t = state.targets[idx];
+  const old = await promoteToSource(t);
+  if (!old) return;
+  try {
+    await applyTarget(idx, old, true); // 原源文件夹放回该槽位
+    toast(`已交换：${t.name} ⇄ 源文件夹`);
+  } catch (e) {
+    toast('交换失败：' + e.message, 'error');
+  }
+}
+
+async function swapSourceWithDel() {
+  const t = state.delTarget;
+  const old = await promoteToSource(t);
+  if (!old) return;
+  try {
+    await applyDel(old, true);
+    toast(`已交换：${t.name} ⇄ 源文件夹`);
+  } catch (e) {
+    toast('交换失败：' + e.message, 'error');
+  }
+}
+
+/* ============================================================
+ * 图集：5×4 栅格分页浏览源文件夹，点击缩略图定位到该图继续分类
+ * ============================================================ */
+const GRID_COLS = 5;
+const GRID_ROWS = 4;
+const GRID_PER_PAGE = GRID_COLS * GRID_ROWS;
+let gridPage = 0;
+let gridUrls = [];
+
+function gridPageCount() {
+  return Math.ceil(state.source.files.length / GRID_PER_PAGE);
+}
+
+// 切换源文件夹排序（新到旧 / 旧到新），预览与图集共用同一顺序
+async function applySourceSort(mode) {
+  if (mode === sourceSortMode) { updateGridSortUI(); return; }
+  const oldMode = sourceSortMode;
+  sourceSortMode = mode;
+  try { localStorage.setItem(SORT_PREF_KEY, mode); } catch (e) { /* noop */ }
+  if (state.source && state.source.files.length > 1) {
+    const cur = state.source.files[state.index] || null;
+    try {
+      state.source.files = await sortFiles(state.source.files, mode);
+      if (cur) {
+        const ni = state.source.files.indexOf(cur);
+        if (ni >= 0) state.index = ni;
+      }
+      renderAll(); // 保持当前文件预览与统计同步
+    } catch (e) {
+      sourceSortMode = oldMode;
+      toast('排序失败：' + e.message, 'error');
+    }
+  }
+  updateGridSortUI();
+}
+
+function updateGridSortUI() {
+  const isNew = sourceSortMode === SORT_NEW_FIRST;
+  gridSortNew.classList.toggle('active', isNew);
+  gridSortOld.classList.toggle('active', !isNew);
+}
+
+async function switchGridSort(mode) {
+  if (mode === sourceSortMode) return;
+  await applySourceSort(mode);
+  gridPage = 0;
+  await renderGridPage();
+}
+
+async function openGrid() {
+  if (!state.source) { toast('请先载入源文件夹', 'warn'); return; }
+  if (state.source.files.length === 0) { toast('源文件夹中没有图片', 'warn'); return; }
+  gridTitle.textContent = `图集 · ${state.source.name}（共 ${state.source.files.length} 张）`;
+  updateGridSortUI();
+  gridPage = Math.floor(state.index / GRID_PER_PAGE); // 打开时定位到当前图片所在页
+  gridModal.hidden = false;
+  await renderGridPage();
+}
+
+function closeGrid() {
+  gridModal.hidden = true;
+  for (const u of gridUrls) URL.revokeObjectURL(u);
+  gridUrls = [];
+  gridBox.innerHTML = '';
+}
+
+function pickGridImage(gi) {
+  closeGrid();
+  state.index = gi;
+  renderAll();
+  toast(`已定位到第 ${gi + 1} 张，继续分类`);
+}
+
+async function renderGridPage() {
+  for (const u of gridUrls) URL.revokeObjectURL(u);
+  gridUrls = [];
+  gridBox.innerHTML = '';
+  const total = state.source.files.length;
+  const pages = Math.max(1, gridPageCount());
+  if (gridPage < 0) gridPage = 0;
+  if (gridPage > pages - 1) gridPage = pages - 1;
+  const start = gridPage * GRID_PER_PAGE;
+  const pageFiles = state.source.files.slice(start, start + GRID_PER_PAGE);
+
+  const cells = await Promise.all(pageFiles.map(async (fh, j) => {
+    const gi = start + j;
+    const fig = document.createElement('figure');
+    fig.className = 'grid-item';
+    const img = document.createElement('img');
+    img.alt = fh.name;
+    try {
+      const file = await fh.getFile();
+      const url = URL.createObjectURL(file);
+      gridUrls.push(url);
+      img.src = url;
+      fig.appendChild(img);
+      const badge = document.createElement('span');
+      badge.className = 'grid-index';
+      badge.textContent = String(gi + 1);
+      fig.appendChild(badge);
+      fig.addEventListener('click', () => pickGridImage(gi));
+    } catch (e) {
+      fig.textContent = '⚠️';
+      fig.classList.add('broken');
+    }
+    return fig;
+  }));
+  for (const c of cells) gridBox.appendChild(c);
+
+  gridPageInfo.textContent = `${gridPage + 1} / ${pages}`;
+  gridPrev.disabled = gridPage === 0;
+  gridNext.disabled = gridPage >= pages - 1;
+}
+
+/* ============================================================
  * 预览
  * ============================================================ */
 async function renderPreview() {
@@ -403,6 +596,7 @@ function renderStats() {
 function updateSlot(slot, t, keyLabel) {
   const nameEl = slot.querySelector('.slot-name');
   const countEl = slot.querySelector('.slot-count');
+  const swapEl = slot.querySelector('.slot-swap');
   const clearEl = slot.querySelector('.slot-clear');
   const keyEl = slot.querySelector('.key');
   if (keyLabel) {
@@ -416,12 +610,14 @@ function updateSlot(slot, t, keyLabel) {
     slot.classList.remove('empty');
     nameEl.textContent = t.name;
     countEl.textContent = t.count === null ? '…' : `${t.count} 个文件`;
+    swapEl.hidden = false;
     clearEl.hidden = false;
   } else {
     slot.classList.remove('filled');
     slot.classList.add('empty');
     nameEl.textContent = slot.classList.contains('del') ? '拖入固定文件夹' : '拖入文件夹';
     countEl.textContent = '—';
+    swapEl.hidden = true;
     clearEl.hidden = true;
   }
 }
@@ -747,6 +943,7 @@ function buildSlot(keyLabel, isDel) {
       <div class="slot-count">—</div>
     </div>
     <span class="key">${keyLabel}</span>
+    <button class="slot-swap" type="button" title="与源文件夹交换" hidden>⇄</button>
     <button class="slot-clear" type="button" title="移除该文件夹">✕</button>`;
   return slot;
 }
@@ -761,6 +958,8 @@ async function openPickerFor(i) {
 }
 
 function wireSortSlot(slot, i) {
+  const swapEl = slot.querySelector('.slot-swap');
+  swapEl.addEventListener('click', (e) => { e.stopPropagation(); swapSourceWithSort(i); });
   const clearEl = slot.querySelector('.slot-clear');
   clearEl.addEventListener('click', (e) => { e.stopPropagation(); clearTarget(i); });
 
@@ -807,6 +1006,8 @@ function wireSortSlot(slot, i) {
 }
 
 function wireDelSlot(slot) {
+  const swapEl = slot.querySelector('.slot-swap');
+  swapEl.addEventListener('click', (e) => { e.stopPropagation(); swapSourceWithDel(); });
   const clearEl = slot.querySelector('.slot-clear');
   clearEl.addEventListener('click', (e) => { e.stopPropagation(); clearDelTarget(); });
 
@@ -876,6 +1077,11 @@ targetPane.addEventListener('drop', async (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  // 图集打开时屏蔽分类热键，仅响应 Esc 关闭
+  if (!gridModal.hidden) {
+    if (e.key === 'Escape') { e.preventDefault(); closeGrid(); }
+    return;
+  }
   if (e.ctrlKey || e.metaKey) {
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
     return;
@@ -930,5 +1136,12 @@ clearTargetsBtn.addEventListener('click', clearAllTargets);
 clearBtn.addEventListener('click', clearAll);
 restoreBtn.addEventListener('click', restorePending);
 dismissRestoreBtn.addEventListener('click', dismissRestore);
+gridBtn.addEventListener('click', openGrid);
+gridClose.addEventListener('click', closeGrid);
+gridOverlay.addEventListener('click', (e) => { if (e.target === gridOverlay) closeGrid(); });
+gridPrev.addEventListener('click', async () => { if (gridPage > 0) { gridPage--; await renderGridPage(); } });
+gridNext.addEventListener('click', async () => { if (gridPage < gridPageCount() - 1) { gridPage++; await renderGridPage(); } });
+gridSortNew.addEventListener('click', () => switchGridSort(SORT_NEW_FIRST));
+gridSortOld.addEventListener('click', () => switchGridSort(SORT_OLD_FIRST));
 renderAll();
 restoreFromStorage();
