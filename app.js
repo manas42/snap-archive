@@ -286,6 +286,7 @@ function resetSource() {
   state.index = 0;
   state.undoStack = [];
   if (state.currentUrl) { URL.revokeObjectURL(state.currentUrl); state.currentUrl = null; }
+  revokePreviewUrls();
   previewStage.innerHTML = '';
   dbDelete('source').catch(() => {});
   renderAll();
@@ -424,37 +425,47 @@ async function swapSourceWithDel() {
 }
 
 /* ============================================================
- * 图集：5×4 栅格分页浏览源文件夹，点击缩略图定位到该图继续分类
+ * 图集：5×4 栅格分页浏览文件夹图片
+ *  - kind=source（源文件夹）：点击缩略图定位到该图继续分类
+ *  - kind=target（目标槽位）：只读预览，点击无跳转
  * ============================================================ */
 const GRID_COLS = 5;
 const GRID_ROWS = 4;
 const GRID_PER_PAGE = GRID_COLS * GRID_ROWS;
 let gridPage = 0;
 let gridUrls = [];
+let gridKind = 'source'; // 'source' | 'target'
+let gridFiles = [];      // 当前浏览的图片句柄列表
 
 function gridPageCount() {
-  return Math.ceil(state.source.files.length / GRID_PER_PAGE);
+  return Math.ceil(gridFiles.length / GRID_PER_PAGE);
 }
 
-// 切换源文件夹排序（新到旧 / 旧到新），预览与图集共用同一顺序
+// 切换排序（新到旧 / 旧到新）：作用于当前图集的 gridFiles，
+// 查看源图集时同步主预览顺序并保持当前图片不丢失
 async function applySourceSort(mode) {
   if (mode === sourceSortMode) { updateGridSortUI(); return; }
   const oldMode = sourceSortMode;
   sourceSortMode = mode;
   try { localStorage.setItem(SORT_PREF_KEY, mode); } catch (e) { /* noop */ }
-  if (state.source && state.source.files.length > 1) {
-    const cur = state.source.files[state.index] || null;
-    try {
-      state.source.files = await sortFiles(state.source.files, mode);
+  try {
+    const cur = (gridKind === 'source' && state.source)
+      ? (state.source.files[state.index] || null)
+      : null;
+    if (gridFiles.length > 1) {
+      gridFiles = await sortFiles(gridFiles, mode);
+    }
+    if (gridKind === 'source' && state.source) {
+      state.source.files = gridFiles;
       if (cur) {
-        const ni = state.source.files.indexOf(cur);
+        const ni = gridFiles.indexOf(cur);
         if (ni >= 0) state.index = ni;
       }
       renderAll(); // 保持当前文件预览与统计同步
-    } catch (e) {
-      sourceSortMode = oldMode;
-      toast('排序失败：' + e.message, 'error');
     }
+  } catch (e) {
+    sourceSortMode = oldMode;
+    toast('排序失败：' + e.message, 'error');
   }
   updateGridSortUI();
 }
@@ -463,33 +474,61 @@ function updateGridSortUI() {
   const isNew = sourceSortMode === SORT_NEW_FIRST;
   gridSortNew.classList.toggle('active', isNew);
   gridSortOld.classList.toggle('active', !isNew);
+  // 只读预览（目标槽位图集）不允许切排序：避免全局偏好与源顺序脱节
+  const ro = gridKind !== 'source';
+  gridSortNew.disabled = ro;
+  gridSortOld.disabled = ro;
 }
 
 async function switchGridSort(mode) {
+  if (gridKind !== 'source') return; // 只读预览不切排序
   if (mode === sourceSortMode) return;
   await applySourceSort(mode);
   gridPage = 0;
   await renderGridPage();
 }
 
+// 源文件夹图集：可点击跳转
 async function openGrid() {
   if (!state.source) { toast('请先载入源文件夹', 'warn'); return; }
   if (state.source.files.length === 0) { toast('源文件夹中没有图片', 'warn'); return; }
+  gridKind = 'source';
+  gridFiles = state.source.files;
   gridTitle.textContent = `图集 · ${state.source.name}（共 ${state.source.files.length} 张）`;
   updateGridSortUI();
-  gridPage = Math.floor(state.index / GRID_PER_PAGE); // 打开时定位到当前图片所在页
+  gridPage = Math.floor(state.index / GRID_PER_PAGE); // 定位到当前图片所在页
   gridModal.hidden = false;
   await renderGridPage();
+}
+
+// 目标槽位图集：只读预览
+async function openTargetGrid(t) {
+  if (!t) { toast('该槽位没有文件夹', 'warn'); return; }
+  try {
+    const files = await listImages(t.handle); // 按当前排序偏好排列
+    if (files.length === 0) { toast(`「${t.name}」中没有可预览的图片`, 'warn'); return; }
+    gridKind = 'target';
+    gridFiles = files;
+    gridTitle.textContent = `图集 · ${t.name}（共 ${files.length} 张 · 只读预览）`;
+    updateGridSortUI();
+    gridPage = 0;
+    gridModal.hidden = false;
+    await renderGridPage();
+  } catch (e) {
+    toast('打开图集失败：' + e.message, 'error');
+  }
 }
 
 function closeGrid() {
   gridModal.hidden = true;
   for (const u of gridUrls) URL.revokeObjectURL(u);
   gridUrls = [];
+  gridFiles = [];
   gridBox.innerHTML = '';
 }
 
 function pickGridImage(gi) {
+  if (gridKind !== 'source') return; // 只读模式不跳转
   closeGrid();
   state.index = gi;
   renderAll();
@@ -500,12 +539,13 @@ async function renderGridPage() {
   for (const u of gridUrls) URL.revokeObjectURL(u);
   gridUrls = [];
   gridBox.innerHTML = '';
-  const total = state.source.files.length;
+  gridBox.classList.toggle('readonly', gridKind !== 'source');
+  const total = gridFiles.length;
   const pages = Math.max(1, gridPageCount());
   if (gridPage < 0) gridPage = 0;
   if (gridPage > pages - 1) gridPage = pages - 1;
   const start = gridPage * GRID_PER_PAGE;
-  const pageFiles = state.source.files.slice(start, start + GRID_PER_PAGE);
+  const pageFiles = gridFiles.slice(start, start + GRID_PER_PAGE);
 
   const cells = await Promise.all(pageFiles.map(async (fh, j) => {
     const gi = start + j;
@@ -523,7 +563,9 @@ async function renderGridPage() {
       badge.className = 'grid-index';
       badge.textContent = String(gi + 1);
       fig.appendChild(badge);
-      fig.addEventListener('click', () => pickGridImage(gi));
+      if (gridKind === 'source') {
+        fig.addEventListener('click', () => pickGridImage(gi));
+      }
     } catch (e) {
       fig.textContent = '⚠️';
       fig.classList.add('broken');
@@ -538,44 +580,140 @@ async function renderGridPage() {
 }
 
 /* ============================================================
- * 预览
+ * 预览：三联对比——中间当前图，左侧上一张、右侧下一张
+ * （两侧按 75% 宽度并减淡，点击只切换不归类；无图时该侧留空）
+ *
+ * 平滑策略：媒体元素与 object URL 按文件句柄缓存并复用。
+ * 翻页时主画面直接“挪用”刚在侧栏解码好的相邻图元素，零重新解码；
+ * 只有窗口远端新出现的图才异步补图。缓存保留当前 ±8 张。
  * ============================================================ */
+const previewMediaCache = new Map(); // FileSystemFileHandle -> { handle, el, url, loading, failed }
+const PREVIEW_CACHE_RADIUS = 8;
+let triCells = null; // { L, M, R }
+
+function previewCellRefs() {
+  if (!triCells || !previewStage.contains(triCells.L)) {
+    const L = document.createElement('div');
+    L.className = 'tri-side';
+    const M = document.createElement('div');
+    M.className = 'tri-main';
+    const R = document.createElement('div');
+    R.className = 'tri-side';
+    L.addEventListener('click', () => prev());
+    R.addEventListener('click', () => next());
+    triCells = { L, M, R };
+    previewStage.appendChild(L);
+    previewStage.appendChild(M);
+    previewStage.appendChild(R);
+  }
+  return triCells;
+}
+
+// 释放并清空全部预览缓存（换源 / 重置 / 清缓存时调用）
+function revokePreviewUrls() {
+  for (const rec of previewMediaCache.values()) {
+    if (rec.url) URL.revokeObjectURL(rec.url);
+  }
+  previewMediaCache.clear();
+}
+
+// 只保留当前窗口 ±RADIUS 内的缓存，窗口外的 URL 释放、元素丢弃
+function prunePreviewCache(files, index) {
+  if (files.length === 0) { revokePreviewUrls(); return; }
+  const lo = Math.max(0, index - PREVIEW_CACHE_RADIUS);
+  const hi = Math.min(files.length - 1, index + PREVIEW_CACHE_RADIUS);
+  const keep = new Set();
+  for (let k = lo; k <= hi; k++) keep.add(files[k]);
+  for (const [h, rec] of previewMediaCache) {
+    if (keep.has(h)) continue;
+    if (rec.url) URL.revokeObjectURL(rec.url);
+    previewMediaCache.delete(h);
+  }
+}
+
+function getOrCreatePreviewMedia(handle) {
+  let rec = previewMediaCache.get(handle);
+  if (rec) return rec;
+  const isVideo = VIDEO_EXT.has(extOf(handle.name));
+  const el = isVideo ? document.createElement('video') : document.createElement('img');
+  el.draggable = false;
+  rec = { handle, el, url: null, loading: false, failed: false };
+  previewMediaCache.set(handle, rec);
+  return rec;
+}
+
+async function loadPreviewMedia(rec) {
+  if (rec.loading || rec.url || rec.failed) return;
+  rec.loading = true;
+  try {
+    const file = await rec.handle.getFile();
+    if (!previewMediaCache.has(rec.handle)) return; // 已被淘汰
+    const url = URL.createObjectURL(file);
+    rec.url = url;
+    rec.el.src = url;
+    if (rec.el.tagName === 'VIDEO') {
+      rec.el.muted = true;
+      rec.el.loop = true;
+      rec.el.preload = 'auto';
+      if (rec.el.closest('.tri-main')) { try { await rec.el.play(); } catch (e) { /* noop */ } }
+    }
+  } catch (e) {
+    rec.failed = true; // 文件不可读（可能已被移走）→ 该格留空
+    previewMediaCache.delete(rec.handle);
+  } finally {
+    rec.loading = false;
+  }
+}
+
+function applyRole(rec, role) {
+  const el = rec.el;
+  if (el.tagName !== 'VIDEO') return;
+  if (role === 'main') {
+    el.controls = true;
+    if (rec.url) { try { el.play().catch(() => {}); } catch (e) { /* noop */ } }
+  } else {
+    el.controls = false;
+    el.pause();
+  }
+}
+
+// 把某文件放进指定格：replaceChildren 天然完成“从旧格移动到新格”，
+// 已解码的元素移动时不重载，因此主画面切换无黑屏
+function placeInCell(cell, fh, role) {
+  if (!fh) {
+    cell.replaceChildren();
+    cell.classList.remove('filled');
+    return;
+  }
+  const rec = getOrCreatePreviewMedia(fh);
+  cell.replaceChildren(rec.el);
+  cell.classList.add('filled');
+  applyRole(rec, role);
+  loadPreviewMedia(rec); // 未加载过才真正异步读文件
+}
+
 async function renderPreview() {
-  if (!state.source) return;
-  if (state.source.files.length === 0) {
+  if (!state.source) { return; }
+  const files = state.source.files;
+  if (files.length === 0) {
+    revokePreviewUrls();
     previewStage.innerHTML = '';
     fileChip.hidden = true;
     renderStats();
     return;
   }
+  prunePreviewCache(files, state.index);
+  const cells = previewCellRefs();
 
-  const fileHandle = state.source.files[state.index];
-  let file;
-  try {
-    file = await fileHandle.getFile();
-  } catch (e) {
-    toast('读取文件失败：' + e.message, 'error');
-    return;
-  }
+  const prevFh = state.index > 0 ? files[state.index - 1] : null;
+  const curFh = files[state.index];
+  const nextFh = state.index < files.length - 1 ? files[state.index + 1] : null;
 
-  if (state.currentUrl) URL.revokeObjectURL(state.currentUrl);
-  const url = URL.createObjectURL(file);
-  state.currentUrl = url;
+  placeInCell(cells.L, prevFh, 'side');
+  placeInCell(cells.M, curFh, 'main');
+  placeInCell(cells.R, nextFh, 'side');
 
-  previewStage.innerHTML = '';
-  const isVideo = VIDEO_EXT.has(extOf(file.name));
-  const media = isVideo ? document.createElement('video') : document.createElement('img');
-  if (isVideo) {
-    media.autoplay = true;
-    media.loop = true;
-    media.muted = true;
-    media.controls = true;
-  }
-  media.src = url;
-  media.addEventListener('error', () => toast('无法预览该文件', 'warn'));
-  previewStage.appendChild(media);
-
-  fileChip.textContent = file.name;
+  fileChip.textContent = curFh.name;
   fileChip.hidden = false;
   renderStats();
 }
@@ -597,6 +735,7 @@ function updateSlot(slot, t, keyLabel) {
   const nameEl = slot.querySelector('.slot-name');
   const countEl = slot.querySelector('.slot-count');
   const swapEl = slot.querySelector('.slot-swap');
+  const gridEl = slot.querySelector('.slot-grid');
   const clearEl = slot.querySelector('.slot-clear');
   const keyEl = slot.querySelector('.key');
   if (keyLabel) {
@@ -611,6 +750,7 @@ function updateSlot(slot, t, keyLabel) {
     nameEl.textContent = t.name;
     countEl.textContent = t.count === null ? '…' : `${t.count} 个文件`;
     swapEl.hidden = false;
+    gridEl.hidden = false;
     clearEl.hidden = false;
   } else {
     slot.classList.remove('filled');
@@ -618,6 +758,7 @@ function updateSlot(slot, t, keyLabel) {
     nameEl.textContent = slot.classList.contains('del') ? '拖入固定文件夹' : '拖入文件夹';
     countEl.textContent = '—';
     swapEl.hidden = true;
+    gridEl.hidden = true;
     clearEl.hidden = true;
   }
 }
@@ -893,6 +1034,7 @@ async function clearAll() {
   state.index = 0;
   state.undoStack = [];
   if (state.currentUrl) { URL.revokeObjectURL(state.currentUrl); state.currentUrl = null; }
+  revokePreviewUrls();
   previewStage.innerHTML = '';
   dismissRestore();
   renderAll();
@@ -944,6 +1086,7 @@ function buildSlot(keyLabel, isDel) {
     </div>
     <span class="key">${keyLabel}</span>
     <button class="slot-swap" type="button" title="与源文件夹交换" hidden>⇄</button>
+    <button class="slot-grid" type="button" title="图集预览" hidden>▦</button>
     <button class="slot-clear" type="button" title="移除该文件夹">✕</button>`;
   return slot;
 }
@@ -960,6 +1103,8 @@ async function openPickerFor(i) {
 function wireSortSlot(slot, i) {
   const swapEl = slot.querySelector('.slot-swap');
   swapEl.addEventListener('click', (e) => { e.stopPropagation(); swapSourceWithSort(i); });
+  const gridEl = slot.querySelector('.slot-grid');
+  gridEl.addEventListener('click', (e) => { e.stopPropagation(); openTargetGrid(state.targets[i]); });
   const clearEl = slot.querySelector('.slot-clear');
   clearEl.addEventListener('click', (e) => { e.stopPropagation(); clearTarget(i); });
 
@@ -1008,6 +1153,8 @@ function wireSortSlot(slot, i) {
 function wireDelSlot(slot) {
   const swapEl = slot.querySelector('.slot-swap');
   swapEl.addEventListener('click', (e) => { e.stopPropagation(); swapSourceWithDel(); });
+  const gridEl = slot.querySelector('.slot-grid');
+  gridEl.addEventListener('click', (e) => { e.stopPropagation(); openTargetGrid(state.delTarget); });
   const clearEl = slot.querySelector('.slot-clear');
   clearEl.addEventListener('click', (e) => { e.stopPropagation(); clearDelTarget(); });
 
@@ -1143,5 +1290,6 @@ gridPrev.addEventListener('click', async () => { if (gridPage > 0) { gridPage--;
 gridNext.addEventListener('click', async () => { if (gridPage < gridPageCount() - 1) { gridPage++; await renderGridPage(); } });
 gridSortNew.addEventListener('click', () => switchGridSort(SORT_NEW_FIRST));
 gridSortOld.addEventListener('click', () => switchGridSort(SORT_OLD_FIRST));
+updateGridSortUI();
 renderAll();
 restoreFromStorage();
