@@ -161,9 +161,14 @@ function toast(msg, type = 'success') {
 /* ============================================================
  * 目录 / 文件操作
  * ============================================================ */
+// 目录修改时间缓存：dirHandle -> Map<文件名, lastModified>
+// 避免反复 getFile() 取时间（排序/过滤切换/图集打开共用），内容变动时增量自愈
+const dirMetaCache = new Map();
+
 // filterMode: 'all'（默认）｜'image'（仅图片）｜'video'（仅视频）
 async function listImages(dirHandle, filterMode = 'all') {
   const files = [];
+  const seen = new Set();
   for await (const entry of dirHandle.values()) {
     if (entry.kind !== 'file') continue;
     const ext = extOf(entry.name);
@@ -171,19 +176,35 @@ async function listImages(dirHandle, filterMode = 'all') {
     const isVideo = VIDEO_EXT.has(ext);
     if (filterMode === 'image' && isVideo) continue;
     if (filterMode === 'video' && !isVideo) continue;
+    seen.add(entry.name);
     files.push(entry);
   }
-  return sortFiles(files, sourceSortMode);
+  if (files.length === 0) return files;
+  // 维护该目录的 mtime 缓存：删掉已移走的条目；缺失项由 sortFiles 现取并补回
+  let mtimes = dirMetaCache.get(dirHandle);
+  if (!mtimes) {
+    if (dirMetaCache.size > 24) dirMetaCache.clear(); // 防膨胀
+    mtimes = new Map();
+    dirMetaCache.set(dirHandle, mtimes);
+  }
+  for (const name of Array.from(mtimes.keys())) {
+    if (!seen.has(name)) mtimes.delete(name);
+  }
+  return sortFiles(files, sourceSortMode, mtimes);
 }
 
 // 按修改时间排序：mtime-desc=新到旧（默认），mtime-asc=旧到新；同时间按文件名自然序稳定排序
-async function sortFiles(files, mode) {
+// mtimes 可选：该目录已有的 <文件名, 修改时间> 缓存；缺失的文件现取并补回缓存
+async function sortFiles(files, mode, mtimes) {
   if (files.length <= 1) return files;
   if (mode === SORT_NEW_FIRST || mode === SORT_OLD_FIRST) {
-    const metas = await Promise.all(files.map(async (f) => {
-      let t = 0;
-      try { t = (await f.getFile()).lastModified; } catch (e) { /* noop */ }
-      return { f, t };
+    const metas = files.map((f) => {
+      const cached = mtimes ? mtimes.get(f.name) : undefined;
+      return { f, t: cached === undefined ? null : cached };
+    });
+    await Promise.all(metas.filter((m) => m.t === null).map(async (m) => {
+      try { m.t = (await m.f.getFile()).lastModified; } catch (e) { m.t = 0; }
+      if (mtimes) mtimes.set(m.f.name, m.t);
     }));
     const dir = mode === SORT_OLD_FIRST ? 1 : -1;
     metas.sort((a, b) => {
@@ -614,6 +635,7 @@ async function renderGridPage() {
       gridUrls.push(url);
       media.src = url;
       fig.appendChild(media);
+      if (isVideo) fig.classList.add('video'); // 视频格叠加 ▶ 标识（点击行为不变）
       const badge = document.createElement('span');
       badge.className = 'grid-index';
       badge.textContent = String(gi + 1);

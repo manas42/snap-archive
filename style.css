@@ -621,6 +621,26 @@ kbd {
   background: rgba(0, 0, 0, .65);
   color: var(--text);
 }
+/* 图集里的视频格：中央 ▶ 标识（不自动播放、点击行为与图片格一致） */
+.grid-item.video::after {
+  content: '▶';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 13px;
+  text-indent: 2px;
+  pointer-events: none;
+  z-index: 2;
+}
 .modal-foot {
   display: flex;
   align-items: center;
