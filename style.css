@@ -94,6 +94,23 @@ body {
 }
 .filter-select:hover { border-color: var(--accent); }
 .filter-select option { background: var(--bg-panel); color: var(--text); }
+.autoplay-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.autoplay-toggle:hover { color: var(--text); }
+.autoplay-toggle input {
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
 .btn:disabled,
 .btn:disabled:hover {
   opacity: .45;
@@ -222,6 +239,7 @@ body {
 }
 /* 三联预览：主图 40%，两侧各 30%（= 主图的 75%）并减淡 */
 .tri-main {
+  position: relative;
   flex: 0 1 40%;
   height: 100%;
   min-width: 0;
@@ -230,6 +248,7 @@ body {
   justify-content: center;
 }
 .tri-side {
+  position: relative;
   flex: 0 1 30%;
   height: 100%;
   min-width: 0;
@@ -245,6 +264,7 @@ body {
 /* 主图首次加载/跳页瞬间：转圈提示而非黑屏（两侧留空区不放 spinner） */
 .tri-main:empty::after {
   content: '';
+  display: block;
   width: 28px;
   height: 28px;
   border: 3px solid var(--border-strong);
@@ -253,6 +273,39 @@ body {
   animation: tri-spin .8s linear infinite;
 }
 @keyframes tri-spin { to { transform: rotate(360deg); } }
+
+/* 视频标识：格子中央 ▶；主图播放中显示 ⏸（点击画面可切换） */
+.tri-main::after,
+.tri-side::after {
+  content: '▶';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 16px;
+  text-indent: 3px;
+  pointer-events: none;
+  z-index: 3;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .4);
+}
+.tri-side.video::after { display: flex; opacity: .8; }
+.tri-main.video.paused::after { display: flex; }
+.tri-main.video.playing::after {
+  content: '⏸';
+  display: flex;
+  font-size: 15px;
+  text-indent: 0;
+  opacity: .5;
+  background: rgba(0, 0, 0, .4);
+}
 
 /* ---------- 移动飞入动画 ---------- */
 .fly-ghost {

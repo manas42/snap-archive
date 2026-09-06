@@ -25,6 +25,10 @@ if (sourceSortMode !== SORT_NEW_FIRST && sourceSortMode !== SORT_OLD_FIRST) sour
 let sourceFilter = 'all';
 try { sourceFilter = localStorage.getItem(FILTER_PREF_KEY) || 'all'; } catch (e) { /* noop */ }
 if (!['all', 'image', 'video'].includes(sourceFilter)) sourceFilter = 'all';
+// 主图视频是否自动播放（预览图总是不自动播放），偏好持久化
+const AUTOPLAY_PREF_KEY = 'snap-archive-autoplay';
+let autoplayVideo = true;
+try { autoplayVideo = localStorage.getItem(AUTOPLAY_PREF_KEY) !== '0'; } catch (e) { /* noop */ }
 
 function keyLabelFor(i) {
   return i < SORT_KEYS.length ? SORT_KEYS[i] : '';
@@ -78,6 +82,7 @@ const gridTitle = $('gridTitle');
 const gridSortNew = $('gridSortNew');
 const gridSortOld = $('gridSortOld');
 const filterSelect = $('filterSelect');
+const autoplayCheck = $('autoplayCheck');
 
 const slotEls = new Array(SORT_COUNT).fill(null);
 let delSlotEl = null;
@@ -690,10 +695,36 @@ function getOrCreatePreviewMedia(handle) {
   if (isVideo) {
     el.muted = true;
     el.playsInline = true;
-    // 非主图位置不自动播放；等元数据就绪后回卷到首帧（只显示第一帧）
+    // 元数据就绪后回卷到首帧（只显示第一帧，供侧栏/未播放主图使用）
     el.addEventListener('loadedmetadata', () => {
       try { el.currentTime = 0; } catch (e) { /* noop */ }
     }, { once: true });
+    // 播放状态 → 所在格中央图标：暂停 ▶ / 播放中 ⏸
+    const syncCellState = () => {
+      const cell = el.closest('.tri-main, .tri-side');
+      if (!cell) return;
+      cell.classList.toggle('playing', !el.paused);
+      cell.classList.toggle('paused', el.paused);
+    };
+    el.addEventListener('play', syncCellState);
+    el.addEventListener('pause', syncCellState);
+    // 主图画面切换播放/暂停。
+    // 用 pointerdown（按下即翻转）而非 click：避免与原生 controls 的
+    // shadow 播放按钮事件重定向冲突（否则会“暂停一帧又恢复 / 点了不播”）。
+    el.addEventListener('pointerdown', (ev) => {
+      if (!el.closest('.tri-main')) return; // 侧栏交给格子做前后切换
+      if (ev.button !== 0) return;          // 仅左键
+      const r = el.getBoundingClientRect();
+      // 原生控件区（底部进度/音量条，及右侧音量/全屏弹出）交由控件本身处理
+      if (ev.clientY - r.top > r.height - 56) return;
+      if (r.right - ev.clientX < 64) return;
+      if (el.paused) { try { el.play().catch(() => {}); } catch (e) { /* noop */ } }
+      else { el.pause(); }
+    });
+    // Chromium 对带 controls 的 video 有内置“点击画面切换播放/暂停”，
+    // 与上面的 pointerdown 切换叠加会造成每次点击翻转两次（点一下动一下/停一帧又播）。
+    // 这里吞掉 click 的 UA 默认行为，仅保留我们一次性的 pointerdown 切换。
+    el.addEventListener('click', (e) => e.preventDefault());
   }
   rec = { handle, el, url: null, loading: false, failed: false };
   previewMediaCache.set(handle, rec);
@@ -712,10 +743,15 @@ async function loadPreviewMedia(rec) {
     if (rec.el.tagName === 'VIDEO') {
       rec.el.loop = true;
       const inMain = !!rec.el.closest('.tri-main');
-      rec.el.preload = inMain ? 'auto' : 'metadata'; // 侧栏只取首帧，不整段预载
+      // 仅「主图 + 自动播放开启」才整段预载；其余只取元数据/首帧
+      rec.el.preload = (inMain && autoplayVideo) ? 'auto' : 'metadata';
       if (inMain) {
-        // 主图：保留自动播放
-        try { await rec.el.play(); } catch (e) { /* noop */ }
+        // 主图：是否自动播放取决于开关；关闭时停在首帧等待手动播放
+        if (autoplayVideo) {
+          try { await rec.el.play(); } catch (e) { /* noop */ }
+        } else {
+          try { rec.el.currentTime = 0; } catch (e) { /* noop */ }
+        }
       } else {
         // 侧栏：不自动播放，只停在首帧
         try { rec.el.currentTime = 0; } catch (e) { /* noop */ }
@@ -734,7 +770,13 @@ function applyRole(rec, role) {
   if (el.tagName !== 'VIDEO') return;
   if (role === 'main') {
     el.controls = true;
-    if (rec.url) { try { el.play().catch(() => {}); } catch (e) { /* noop */ } }
+    if (rec.url) {
+      if (autoplayVideo) {
+        try { el.play().catch(() => {}); } catch (e) { /* noop */ }
+      } else {
+        try { el.pause(); el.currentTime = 0; } catch (e) { /* noop */ }
+      }
+    }
   } else {
     // 切回侧栏：停播并回到首帧
     el.controls = false;
@@ -742,17 +784,38 @@ function applyRole(rec, role) {
   }
 }
 
+// 自动播放开关变化：应用偏好并即时作用到当前主视频
+function applyAutoplayPref() {
+  try { localStorage.setItem(AUTOPLAY_PREF_KEY, autoplayVideo ? '1' : '0'); } catch (e) { /* noop */ }
+  const cell = triCells && triCells.M;
+  const el = cell && cell.firstElementChild;
+  if (!el || el.tagName !== 'VIDEO' || !el.closest('.tri-main')) return;
+  if (autoplayVideo) {
+    if (el.paused) { try { el.play().catch(() => {}); } catch (e) { /* noop */ } }
+  } else {
+    try { el.pause(); el.currentTime = 0; } catch (e) { /* noop */ }
+  }
+}
+
 // 把某文件放进指定格：replaceChildren 天然完成“从旧格移动到新格”，
 // 已解码的元素移动时不重载，因此主画面切换无黑屏
 function placeInCell(cell, fh, role) {
+  const isVideo = !!fh && VIDEO_EXT.has(extOf(fh.name));
   if (!fh) {
     cell.replaceChildren();
-    cell.classList.remove('filled');
+    cell.classList.remove('filled', 'video', 'paused', 'playing');
     return;
   }
   const rec = getOrCreatePreviewMedia(fh);
   cell.replaceChildren(rec.el);
   cell.classList.add('filled');
+  if (isVideo) {
+    // 中央播放图标状态：默认暂停，播放/暂停事件会同步修正
+    cell.classList.add('video', 'paused');
+    cell.classList.remove('playing');
+  } else {
+    cell.classList.remove('video', 'paused', 'playing');
+  }
   applyRole(rec, role);
   loadPreviewMedia(rec); // 未加载过才真正异步读文件
 }
@@ -1425,6 +1488,11 @@ gridSortNew.addEventListener('click', () => switchGridSort(SORT_NEW_FIRST));
 gridSortOld.addEventListener('click', () => switchGridSort(SORT_OLD_FIRST));
 filterSelect.addEventListener('change', () => setSourceFilter(filterSelect.value));
 filterSelect.value = sourceFilter;
+autoplayCheck.checked = autoplayVideo;
+autoplayCheck.addEventListener('change', () => {
+  autoplayVideo = autoplayCheck.checked;
+  applyAutoplayPref();
+});
 updateGridSortUI();
 renderAll();
 restoreFromStorage();
