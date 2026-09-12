@@ -71,6 +71,7 @@ const targetPane = $('targetPane');
 const stats = $('stats');
 const toastEl = $('toast');
 const gridBtn = $('gridBtn');
+const deleteSourceBtn = $('deleteSourceBtn');
 const gridModal = $('gridModal');
 const gridOverlay = $('gridOverlay');
 const gridClose = $('gridClose');
@@ -258,16 +259,21 @@ async function pickDirectory() {
 }
 
 async function getDirsFromDrop(e) {
-  const items = e.dataTransfer && e.dataTransfer.items;
-  if (!items || items.length === 0) return [];
+  const dt = e.dataTransfer;
+  if (!dt) return [];
   if (typeof DataTransferItem.prototype.getAsFileSystemHandle !== 'function') {
     throw new Error('请使用 Chrome 或 Edge 浏览器（需要 File System Access API）');
   }
+  // 关键：drop 事件处理函数一旦返回，浏览器就会清空 drag data store（items 变空）。
+  // 所以必须在同步阶段就把 items 快照成数组，并对每一项「立刻」发起
+  // getAsFileSystemHandle()（此时只创建 promise，不等结果）。
+  // 旧写法在 for 循环里 await，第一项之后 items 已被清空，因此拖入多个文件夹只会读到第一个。
+  const items = Array.from(dt.items || []).filter((it) => it.kind === 'file');
+  if (items.length === 0) return [];
+  const results = await Promise.allSettled(items.map((it) => it.getAsFileSystemHandle()));
   const dirs = [];
-  for (const item of items) {
-    if (item.kind !== 'file') continue;
-    const h = await item.getAsFileSystemHandle();
-    if (h && h.kind === 'directory') dirs.push(h);
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value && r.value.kind === 'directory') dirs.push(r.value);
   }
   return dirs;
 }
@@ -313,10 +319,17 @@ async function applySource(handle, silent = false) {
 }
 
 async function loadSource(handle) {
+  // 同一个目录不能既当源又占目标槽位：已在目标区就先拒绝（否则分类等于把文件移回自己）
+  const dup = await dirDupLabel(handle, { exceptSource: true });
+  if (dup) {
+    toast(`「${handle.name}」已在 ${dup}，不能同时作为源文件夹`, 'warn');
+    return false;
+  }
   await dbPut('source', handle);
   const ok = await ensureReadwrite(handle);
   await applySource(handle);
   if (!ok) toast('源文件夹暂未授权写入，首次移动时会再次请求', 'warn');
+  return true;
 }
 
 function resetSource() {
@@ -328,6 +341,131 @@ function resetSource() {
   previewStage.innerHTML = '';
   dbDelete('source').catch(() => {});
   renderAll();
+}
+
+/* ---------- 把已经清空的源文件夹整体移入「丢弃」文件夹（右侧 Del 槽位） ---------- */
+// 先快照目录条目：边搬边删会让 entries() 迭代器失效，漏搬文件
+async function listDirEntries(dirHandle) {
+  const out = [];
+  for await (const [name, handle] of dirHandle.entries()) out.push({ name, handle });
+  return out;
+}
+
+// 目录里是否已有同名条目（文件和目录都算）：getDirectoryHandle 撞上同名文件会抛 TypeMismatchError
+async function dirEntryExists(dirHandle, name) {
+  try { await dirHandle.getFileHandle(name); return true; } catch (e) { /* 不是文件 */ }
+  try { await dirHandle.getDirectoryHandle(name); return true; } catch (e) { /* 不是目录 */ }
+  return false;
+}
+
+// 找一个不冲突的名字：已存在则追加 (1)、(2)…
+async function uniqueEntryName(dirHandle, name) {
+  if (!(await dirEntryExists(dirHandle, name))) return name;
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let i = 1; i < 10000; i++) {
+    const candidate = `${base} (${i})${ext}`;
+    if (!(await dirEntryExists(dirHandle, candidate))) return candidate;
+  }
+  return name;
+}
+
+// 递归搬运目录内容：目录句柄没有 move()（Chromium 实测只有 FileSystemFileHandle 有），只能逐个搬。
+// 子目录是「建新目录 + 递归搬内容」，所以搬完后必须把源里的空壳目录删掉，否则源目录永远删不掉。
+// 返回没能清理掉的条目数（0 = 源目录已经彻底空）。
+async function moveDirContents(srcDir, destDir) {
+  const entries = await listDirEntries(srcDir);
+  let left = 0;
+  for (const { name, handle } of entries) {
+    if (handle.kind === 'file') {
+      await moveFile(srcDir, handle, destDir, name);
+    } else {
+      const sub = await destDir.getDirectoryHandle(name, { create: true });
+      left += await moveDirContents(handle, sub);
+      try { await srcDir.removeEntry(name); } catch (e) { left++; } // 空目录才能删，非空会抛错
+    }
+  }
+  return left;
+}
+
+// 目录里还有内容（被「仅图片/仅视频」过滤排除的文件、子文件夹等）时，先整体搬进右侧
+// Del「丢弃」文件夹，再删掉搬空的源目录 —— 这样清理文件夹不会丢掉任何文件。
+// 返回 true 表示源目录已经搬空、可以安全删除。
+async function stashLeftoversToDel(src, del) {
+  // 丢弃文件夹位于源目录内部时拒绝：那等于把目录搬进它自己
+  try {
+    const rel = typeof src.handle.resolve === 'function' ? await src.handle.resolve(del.handle) : null;
+    if (rel) { toast('「丢弃」文件夹在源文件夹内部，无法移入', 'error'); return false; }
+  } catch (e) { /* resolve 不可用则跳过这项校验 */ }
+
+  if (!(await ensureReadwrite(src.handle))) { toast('源文件夹缺少写入权限', 'error'); return false; }
+  if (!(await ensureReadwrite(del.handle))) { toast('「丢弃」文件夹缺少写入权限', 'error'); return false; }
+
+  let destName = src.name;
+  let left = 0;
+  try {
+    destName = await uniqueEntryName(del.handle, src.name);
+    const destDir = await del.handle.getDirectoryHandle(destName, { create: true });
+    left = await moveDirContents(src.handle, destDir);
+  } catch (e) {
+    toast('移入丢弃失败：' + (e.message || e.name), 'error');
+    return false;
+  }
+
+  refreshTargetCount(del); // 丢弃文件夹里多了一个目录，重新计数
+  if (left > 0) {
+    toast(`「${src.name}」里还有 ${left} 项没能搬进「${del.name}」，为避免丢文件已停止删除`, 'error');
+    return false;
+  }
+  return true;
+}
+
+// 删除已经清空的源文件夹。
+// 浏览器能直接删除目录自身：FileSystemHandle.remove()（只对空目录生效，非空会抛
+// InvalidModificationError —— 顺带当成「绝不误删内容」的双保险），不需要任何选择窗口。
+// 若目录里还有被「仅图片/仅视频」过滤排除的文件或子文件夹，会先整体搬进 Del「丢弃」文件夹再删。
+async function deleteEmptySource() {
+  const src = state.source;
+  if (!src) { toast('当前没有源文件夹', 'warn'); return; }
+  if (src.files.length > 0) {
+    toast(`源文件夹里还有 ${src.files.length} 个待分类文件，先处理完再删`, 'warn');
+    return;
+  }
+  if (typeof src.handle.remove !== 'function') {
+    toast('当前浏览器不支持直接删除文件夹（需要较新的 Chrome / Edge），请手动删除', 'warn');
+    return;
+  }
+
+  // 看磁盘上的真实内容，不受「图片/视频」过滤影响
+  let entries = [];
+  try { entries = await listDirEntries(src.handle); } catch (e) { /* 读不到就交给后面的删除流程报错 */ }
+
+  if (entries.length > 0) {
+    const del = state.delTarget;
+    const head = entries.slice(0, 3).map((x) => x.name).join('、');
+    const more = entries.length > 3 ? ' 等' : '';
+    if (!del) {
+      toast(`「${src.name}」里还有 ${entries.length} 项（${head}${more}），请先给 Del 槽位指定「丢弃」文件夹`, 'warn');
+      return;
+    }
+    const ok = window.confirm(
+      `「${src.name}」里还有 ${entries.length} 项（${head}${more}），将先移入「${del.name}」再删除该文件夹。继续？`
+    );
+    if (!ok) return;
+    if (!(await stashLeftoversToDel(src, del))) return;
+  }
+
+  try {
+    if (!(await ensureReadwrite(src.handle))) { toast('源文件夹缺少写入权限', 'error'); return; }
+    await src.handle.remove();
+  } catch (e) {
+    toast('删除失败：' + (e.message || e.name), 'error');
+    return;
+  }
+
+  resetSource(); // 清掉源文件夹状态、撤销栈与 IndexedDB 记录（内部会 renderAll）
+  toast(`已删除空文件夹「${src.name}」🗑`);
 }
 
 // 切换源文件类型过滤（图片 / 视频 / 全部）：重扫目录并按偏好排序，
@@ -433,17 +571,75 @@ function clearDelTarget() {
   renderTargets();
 }
 
+/* ---------- 去重：同一个目录不在目标区重复占位 ---------- */
+// 两个目录句柄是否指向同一个目录：优先用 File System Access 的 isSameEntry（能区分同名不同路径），
+// 句柄失效或浏览器不支持时退化为名称比较。
+async function isSameDir(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (typeof a.isSameEntry === 'function' && typeof b.isSameEntry === 'function') {
+    try { return await a.isSameEntry(b); } catch (e) { /* 句柄失效 → 退化比较 */ }
+  }
+  return a.name === b.name;
+}
+
+// 该目录是否已经占用了某个位置？返回位置描述（'源文件夹' / '目标 3' / 'Del' / '本次拖入中重复'），
+// 未占用返回 null。
+// exceptIdx：忽略某个目标槽位（把目录拖回它自己所在的槽位时允许「刷新」）；
+// exceptDel：忽略 Del 槽位（同理）；
+// exceptSource：忽略「源文件夹」这一项（交换时源本身即将变成目标，不算冲突）；
+// extra：本次批量拖入中已接受的句柄，用于批次内互相去重。
+async function dirDupLabel(handle, { exceptIdx = -1, exceptDel = false, exceptSource = false, extra = [] } = {}) {
+  // 同一个目录不能既是「待分类源」又占着目标槽位（那样的分类等于把文件移回自己）
+  if (!exceptSource && state.source && (await isSameDir(state.source.handle, handle))) return '源文件夹';
+  for (let i = 0; i < SORT_COUNT; i++) {
+    if (i === exceptIdx) continue;
+    const t = state.targets[i];
+    if (t && (await isSameDir(t.handle, handle))) return slotLabel(i);
+  }
+  if (!exceptDel && state.delTarget && (await isSameDir(state.delTarget.handle, handle))) return 'Del';
+  for (const h of extra) {
+    if (await isSameDir(h, handle)) return '本次拖入中重复';
+  }
+  return null;
+}
+
+// 批量拖入：从 startIdx 起依次占用「空」槽位；已填充的槽位不覆盖；已存在的目录不重复添加
 async function loadBatch(dirs, startIdx = 0) {
-  const capacity = SORT_COUNT - startIdx;
-  const n = Math.min(dirs.length, capacity);
-  for (let j = 0; j < n; j++) {
-    await loadTarget(startIdx + j, dirs[j]);
+  const free = [];
+  for (let i = startIdx; i < SORT_COUNT; i++) {
+    if (!state.targets[i]) free.push(i);
   }
-  if (dirs.length > capacity) {
-    toast(`已填充 ${startIdx}–${SORT_COUNT - 1}，丢弃多余 ${dirs.length - n} 个`, 'warn');
-  } else if (n > 0) {
-    toast(`已载入 ${n} 个目标文件夹`);
+  const added = []; // { slot, name }
+  const dups = [];  // '名字（已在 目标 3）'
+  const accepted = [];
+  let overflow = 0;
+  for (const h of dirs) {
+    const dup = await dirDupLabel(h, { extra: accepted });
+    if (dup) { dups.push(`${h.name}（已在 ${dup}）`); continue; }
+    if (added.length >= free.length) { overflow++; continue; }
+    const idx = free[added.length];
+    accepted.push(h);
+    await applyTarget(idx, h, true);
+    added.push({ slot: idx, name: h.name });
   }
+  renderTargets();
+
+  const parts = [];
+  if (added.length) {
+    const head = added.slice(0, 5).map((x) => `${slotLabel(x.slot)}:${x.name}`).join('、');
+    parts.push(`已依次载入 ${added.length} 个：${head}${added.length > 5 ? ` 等 ${added.length} 个` : ''}`);
+  }
+  if (dups.length) {
+    const head = dups.slice(0, 3).join('、');
+    parts.push(`跳过重复 ${dups.length} 个：${head}${dups.length > 3 ? ' 等' : ''}`);
+  }
+  if (overflow) parts.push(`${overflow} 个因槽位不足未添加`);
+  if (!parts.length) {
+    toast('目标槽位已满（20 个），请先移除部分文件夹', 'warn');
+    return;
+  }
+  toast(parts.join('；'), dups.length || overflow ? 'warn' : 'success');
 }
 
 /* ============================================================
@@ -467,6 +663,11 @@ async function promoteToSource(t) {
 
 async function swapSourceWithSort(idx) {
   const t = state.targets[idx];
+  // 交换后原「源文件夹」会落到该槽位：若它已经在别的槽位，交换会造成重复，直接拒绝
+  if (t && state.source) {
+    const dup = await dirDupLabel(state.source.handle, { exceptIdx: idx, exceptSource: true });
+    if (dup) { toast(`源文件夹已在 ${dup}，交换会造成重复，已取消`, 'warn'); return; }
+  }
   const old = await promoteToSource(t);
   if (!old) return;
   try {
@@ -479,6 +680,10 @@ async function swapSourceWithSort(idx) {
 
 async function swapSourceWithDel() {
   const t = state.delTarget;
+  if (t && state.source) {
+    const dup = await dirDupLabel(state.source.handle, { exceptDel: true, exceptSource: true });
+    if (dup) { toast(`源文件夹已在 ${dup}，交换会造成重复，已取消`, 'warn'); return; }
+  }
   const old = await promoteToSource(t);
   if (!old) return;
   try {
@@ -932,6 +1137,8 @@ function renderAll() {
     sourceDrop.hidden = false;
     preview.hidden = true;
   }
+  // 源文件夹已清空（当前过滤下没有待分类文件）→ 顶栏给出「删除空文件夹」入口
+  deleteSourceBtn.hidden = !(state.source && state.source.files.length === 0);
   renderPreview();
   renderTargets();
   updateUndoState();
@@ -1004,7 +1211,7 @@ async function moveCurrentTo(target) {
     });
     if (state.undoStack.length > MAX_UNDO) state.undoStack.shift();
 
-    if (files.length === 0) toast('🎉 全部处理完成');
+    if (files.length === 0) toast('🎉 待分类文件已处理完，可点顶栏「🗑 删除空文件夹」清理');
     else toast(`已移动到 ${target.name} ✓`);
     renderAll();
   } catch (e) {
@@ -1171,6 +1378,7 @@ async function restorePending() {
   pendingHandles = [];
   let ok = 0;
   const skipped = [];
+  const dedup = []; // 历史记录里重复的目录（旧版本可能写进两个槽位）
   for (const { key, handle } of list) {
     try {
       let p = 'prompt';
@@ -1180,6 +1388,18 @@ async function restorePending() {
       }
       try { p = await handle.queryPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
       if (p === 'granted') {
+        if (key !== 'source') {
+          // 目标区不允许同一个目录占两个槽位：重复记录直接清掉，不再恢复
+          const except = key === 'del'
+            ? { exceptDel: true }
+            : { exceptIdx: parseInt(key.slice('target-'.length), 10) };
+          const dup = await dirDupLabel(handle, except);
+          if (dup) {
+            dbDelete(key).catch(() => {});
+            dedup.push(`${handle.name}（已在 ${dup}）`);
+            continue;
+          }
+        }
         const record = await dbGet(key);
         await applyStored(key, record || { handle, count: null });
         ok++;
@@ -1193,12 +1413,15 @@ async function restorePending() {
     }
   }
   updateRestoreBanner();
+  const dedupNote = dedup.length
+    ? `；已清理 ${dedup.length} 个重复记录（${dedup.slice(0, 3).join('、')}${dedup.length > 3 ? ' 等' : ''}）`
+    : '';
   if (skipped.length === 0) {
-    if (ok > 0) toast(`已恢复上次的会话（${ok} 个文件夹）`);
+    if (ok > 0 || dedup.length) toast(`已恢复上次的会话（${ok} 个文件夹）${dedupNote}`, dedup.length ? 'warn' : 'success');
   } else if (ok > 0) {
-    toast(`已恢复 ${ok} 个文件夹；${skipped.length} 个未授权：${skipped.join('、')}`, 'warn');
+    toast(`已恢复 ${ok} 个文件夹；${skipped.length} 个未授权：${skipped.join('、')}${dedupNote}`, 'warn');
   } else {
-    toast(`未恢复：${skipped.join('、')} 授权被拒绝或不可用`, 'warn');
+    toast(`未恢复：${skipped.join('、')} 授权被拒绝或不可用${dedupNote}`, 'warn');
   }
 }
 
@@ -1283,7 +1506,10 @@ function wireSourceCanvas() {
     try {
       const dirs = await getDirsFromDrop(e);
       if (dirs.length === 0) { toast('请拖入文件夹', 'error'); return; }
-      await loadSource(dirs[0]);
+      const loaded = await loadSource(dirs[0]);
+      if (loaded && dirs.length > 1) {
+        toast(`源文件夹只能有一个，已载入「${dirs[0].name}」，其余 ${dirs.length - 1} 个已忽略`, 'warn');
+      }
     } catch (err) {
       toast(err.message || '读取失败', 'error');
     }
@@ -1311,6 +1537,8 @@ function buildSlot(keyLabel, isDel) {
 async function openPickerFor(i) {
   try {
     const handle = await pickDirectory();
+    const dup = await dirDupLabel(handle, { exceptIdx: i });
+    if (dup) { toast(`「${handle.name}」已在 ${dup}，不重复添加`, 'warn'); return; }
     await loadTarget(i, handle);
   } catch (e) {
     if (e.name !== 'AbortError') toast(e.message || '选择失败', 'error');
@@ -1360,8 +1588,14 @@ function wireSortSlot(slot, i) {
     try {
       const dirs = await getDirsFromDrop(e);
       if (dirs.length === 0) { toast('请拖入文件夹', 'error'); return; }
-      if (dirs.length === 1) await loadTarget(i, dirs[0]);
-      else await loadBatch(dirs, i);
+      if (dirs.length === 1) {
+        // 该目录已在别的槽位 → 不重复添加（拖回自己所在的槽位视为刷新，仍允许）
+        const dup = await dirDupLabel(dirs[0], { exceptIdx: i });
+        if (dup) { toast(`「${dirs[0].name}」已在 ${dup}，不重复添加`, 'warn'); return; }
+        await loadTarget(i, dirs[0]);
+      } else {
+        await loadBatch(dirs, i);
+      }
     } catch (err) {
       toast(err.message || '读取失败', 'error');
     }
@@ -1381,6 +1615,8 @@ function wireDelSlot(slot) {
     else {
       try {
         const h = await pickDirectory();
+        const dup = await dirDupLabel(h, { exceptDel: true });
+        if (dup) { toast(`「${h.name}」已在 ${dup}，不重复添加`, 'warn'); return; }
         await loadDelTarget(h);
       } catch (e) {
         if (e.name !== 'AbortError') toast(e.message || '选择失败', 'error');
@@ -1398,6 +1634,8 @@ function wireDelSlot(slot) {
       const dirs = await getDirsFromDrop(e);
       if (dirs.length === 0) { toast('请拖入文件夹', 'error'); return; }
       if (dirs.length > 1) { toast('Del 槽位只能单独指定一个文件夹', 'warn'); return; }
+      const dup = await dirDupLabel(dirs[0], { exceptDel: true });
+      if (dup) { toast(`「${dirs[0].name}」已在 ${dup}，不重复添加`, 'warn'); return; }
       await loadDelTarget(dirs[0]);
     } catch (err) {
       toast(err.message || '读取失败', 'error');
@@ -1502,6 +1740,7 @@ clearBtn.addEventListener('click', clearAll);
 restoreBtn.addEventListener('click', restorePending);
 dismissRestoreBtn.addEventListener('click', dismissRestore);
 gridBtn.addEventListener('click', openGrid);
+deleteSourceBtn.addEventListener('click', deleteEmptySource);
 gridClose.addEventListener('click', closeGrid);
 gridOverlay.addEventListener('click', (e) => { if (e.target === gridOverlay) closeGrid(); });
 gridPrev.addEventListener('click', async () => { if (gridPage > 0) { gridPage--; await renderGridPage(); } });
