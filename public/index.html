@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#0b0f14" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>Snap Archive</title>
 <style>
@@ -236,6 +237,7 @@
   </button>
   <button class="chip" id="filterChip" data-f="all" title="切换媒体类型（图片 / 视频 / 两者）">图+视</button>
   <button class="hdrbtn" id="gridOpen" title="图集：分页浏览当前目录">▦</button>
+  <button class="hdrbtn" id="fsBtn" title="全屏显示（隐藏浏览器地址栏）">⛶</button>
 </header>
 
 <main>
@@ -268,6 +270,12 @@
       <div class="item">
         <span class="txt"><b>视频自动播放</b><span>翻到视频时自动开始播放。手机浏览器通常要求静音才允许自动播放，被拒绝时会显示 ▶ 按钮等你点。</span></span>
         <button class="btn" id="autoplayBtn">开</button>
+      </div>
+
+      <div class="grp" style="margin-top:14px">全屏</div>
+      <div class="item">
+        <span class="txt"><b>自动全屏</b><span>打开页面后第一次点按即进入全屏（隐藏浏览器地址栏）。手动退出全屏会自动关掉这个开关。</span></span>
+        <button class="btn" id="autofsBtn">关</button>
       </div>
 
       <div class="grp" style="margin-top:14px">媒体类型</div>
@@ -366,6 +374,7 @@ const CFG_URL = ORIGIN + DIR + 'snap-config.json';   // 绝对 URL：页面若�
 const CFG_LS = 'snap.config.cache';
 const FILTER_LS = 'snap.filter';
 const AUTOPLAY_LS = 'snap.autoplay';
+const AUTOFS_LS = 'snap.autofs';
 const SORT_LS = 'snap.sort';
 const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
@@ -387,7 +396,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c)=>({'&':'&amp;','<':'&lt;','>
 const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() || '/');
 
 const S = {
-  cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true,
+  cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true, autoFs: false,
   sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null, swapMode: null, swapFirst: -1,
   entryCount: 0, otherNames: [],
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
@@ -485,7 +494,7 @@ async function place(srcHref, srcName, srcSize, destDir) {
 function snapshot() {
   return {
     version: 1, source: S.source, targets: S.targets, del: S.del,
-    filter: S.filter, autoplay: S.autoplay, sort: S.sortMode,
+    filter: S.filter, autoplay: S.autoplay, autoFs: S.autoFs, sort: S.sortMode,
     undo: S.undoStack.slice(-MAX_UNDO),          // 撤销栈也持久化，刷新/换设备后还能继续撤销
     updated: new Date().toISOString(),
   };
@@ -501,6 +510,7 @@ function applyConfig(c) {
   if (c.del && c.del.path) S.del = { path: normPath(c.del.path), name: c.del.name || labelOf(c.del.path) };
   if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
   if (typeof c.autoplay === 'boolean') S.autoplay = c.autoplay;
+  if (typeof c.autoFs === 'boolean') S.autoFs = c.autoFs;
   if (c.sort === 'mtime-asc' || c.sort === 'mtime-desc') S.sortMode = c.sort;
   if (Array.isArray(c.undo)) {
     S.undoStack = c.undo
@@ -719,6 +729,70 @@ function setAutoplay(v) {
   renderStage();                        // 立刻生效：打开就播，关闭就停在首帧
   toast('视频自动播放：' + (S.autoplay ? '开' : '关'), 'ok', 1400);
 }
+
+/* ---------------- 全屏 ----------------
+ * 说明：Fullscreen API 不需要安全上下文（HTTPS），所以 http:// 下也能用；
+ * 但"像 App 一样独立窗口、无地址栏"的 PWA 安装必须要 HTTPS + Service Worker，
+ * 明文 http 下 Edge 只能建一个普通书签快捷方式。 */
+const isFs = () => !!document.fullscreenElement;
+function updateFsUI() {
+  const b = $('fsBtn');
+  if (b) {
+    b.textContent = isFs() ? '⤡' : '⛶';
+    b.title = isFs() ? '退出全屏' : '全屏显示（隐藏浏览器地址栏）';
+    b.style.borderColor = isFs() ? 'var(--acc)' : 'var(--line)';
+    b.style.color = isFs() ? 'var(--acc)' : 'var(--fg)';
+  }
+  const a = $('autofsBtn');
+  if (a) {
+    a.textContent = S.autoFs ? '开' : '关';
+    a.style.borderColor = S.autoFs ? 'var(--ok)' : 'var(--line)';
+    a.style.color = S.autoFs ? 'var(--ok)' : 'var(--dim)';
+  }
+}
+async function toggleFullscreen() {
+  try {
+    if (isFs()) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+  } catch (e) {
+    toast('这个浏览器不允许全屏：' + (e.message || e.name || e), 'warn', 3500);
+  }
+  updateFsUI();
+}
+function setAutoFs(v) {
+  S.autoFs = !!v;
+  try { localStorage.setItem(AUTOFS_LS, S.autoFs ? '1' : '0'); } catch(e){}
+  updateFsUI(); scheduleSave(); armAutoFs();
+  toast('自动全屏：' + (S.autoFs ? '开（下次点按生效）' : '关'), 'ok', 1800);
+}
+/** 自动全屏必须由用户手势触发，所以"进入页面后的第一次点按/按键"才是时机 */
+let fsArmed = false;
+function armAutoFs() {
+  if (!S.autoFs || isFs() || fsArmed) return;
+  fsArmed = true;
+  const once = () => {
+    document.removeEventListener('pointerdown', once, true);
+    document.removeEventListener('keydown', once, true);
+    fsArmed = false;
+    if (S.autoFs && !isFs()) {
+      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(updateFsUI).catch(() => {});
+    }
+  };
+  document.addEventListener('pointerdown', once, true);
+  document.addEventListener('keydown', once, true);
+}
+document.addEventListener('fullscreenchange', () => {
+  updateFsUI();
+  // 手动退出全屏 → 关掉自动全屏，免得下次点按又被弹进去
+  if (!isFs() && S.autoFs) {
+    S.autoFs = false;
+    try { localStorage.setItem(AUTOFS_LS, '0'); } catch(e){}
+    scheduleSave(); updateFsUI();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') armAutoFs();
+});
 
 function preload() {
   for (const i of [S.index+1, S.index+2, S.index-1]) {
@@ -1056,6 +1130,7 @@ function openSetup() {
   S.swapMode = null; S.swapFirst = -1;      // 每次打开都从普通模式开始
   renderSetup();
   updateAutoplayUI();
+  updateFsUI();
   $('setupSheet').classList.add('on');
   refreshCounts();
 }
@@ -1423,6 +1498,8 @@ $('srcBtn').onclick = () => openPicker('source', -1);
 $('filterChip').onclick = () => setFilter(S.filter === 'all' ? 'image' : S.filter === 'image' ? 'video' : 'all');
 ['all','image','video'].forEach((k) => { const b = $('filter_' + k); if (b) b.onclick = () => setFilter(k); });
 $('autoplayBtn').onclick = () => setAutoplay(!S.autoplay);
+$('fsBtn').onclick = toggleFullscreen;
+$('autofsBtn').onclick = () => setAutoFs(!S.autoFs);
 $('undo').onclick = undo;
 $('discard').onclick = () => {
   if (!S.del) { toast('还没设置「丢弃」目录，去 ⚙ 设置里选一个', 'warn'); openSetup(); return; }
@@ -1505,16 +1582,19 @@ document.addEventListener('keydown', (e) => {
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
   try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
   try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}
+  try { if (localStorage.getItem(AUTOFS_LS) === '1') S.autoFs = true; } catch(e){}
   try { const ls = localStorage.getItem(SORT_LS); if (ls) S.sortMode = ls; } catch(e){}
   buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
   updateFilterUI();
   updateAutoplayUI();
   updateSortUI();
+  updateFsUI();
   renderSlots(); renderHeader();
   await loadConfig();
   renderSlots(); renderHeader();
   const start = (S.source && S.source.path) || DIR;
   await openSource(start);
+  armAutoFs();          // 开了自动全屏的话：等用户进入页面后的第一次点按
   refreshCounts();
 })();
 </script>
