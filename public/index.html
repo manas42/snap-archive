@@ -328,6 +328,7 @@ const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
 const VID = new Set(['mp4','webm']);
 const SLOT_N = 20;                              // 4 列 × 5 行；底部默认只露 3 行，可上下滑
+const MAX_UNDO = 50;                            // 撤销栈深度（与桌面版一致）
 
 const dec = decodeURIComponent;
 const enc = encodeURIComponent;
@@ -344,7 +345,7 @@ const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() ||
 const S = {
   cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all',
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
-  last: null, busy: false, counts: {},
+  undoStack: [], busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
   dirty: false, saving: false,
 };
@@ -432,7 +433,11 @@ async function place(srcHref, srcName, srcSize, destDir) {
 
 /* ---------------- 配置：存在 NAS 上 ---------------- */
 function snapshot() {
-  return { version:1, source:S.source, targets:S.targets, del:S.del, filter:S.filter, updated:new Date().toISOString() };
+  return {
+    version: 1, source: S.source, targets: S.targets, del: S.del, filter: S.filter,
+    undo: S.undoStack.slice(-MAX_UNDO),          // 撤销栈也持久化，刷新/换设备后还能继续撤销
+    updated: new Date().toISOString(),
+  };
 }
 function applyConfig(c) {
   if (!c || typeof c !== 'object') return false;
@@ -444,6 +449,11 @@ function applyConfig(c) {
   }
   if (c.del && c.del.path) S.del = { path:c.del.path, name:c.del.name || labelOf(c.del.path) };
   if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
+  if (Array.isArray(c.undo)) {
+    S.undoStack = c.undo
+      .filter((r) => r && typeof r.backDir === 'string' && typeof r.name === 'string' && typeof r.from === 'string')
+      .slice(-MAX_UNDO);
+  }
   return true;
 }
 async function loadConfig() {
@@ -679,7 +689,11 @@ function renderSlots() {
     b.querySelector('.c').textContent = xd ? '⚠ 跨盘'
       : (t ? (S.counts[t.path] != null ? S.counts[t.path] + ' 个' : '…') : '');
   });
-  $('undo').disabled = !S.last;
+  const n = S.undoStack.length;
+  const ub = $('undo');
+  ub.disabled = n === 0;
+  ub.textContent = n > 0 ? `↶ 撤销 (${n})` : '↶ 撤销';
+  ub.title = n > 0 ? `撤销最近一次移动，还可撤销 ${n} 步` : '没有可撤销的操作';
   $('discard').disabled = false;
   updateSlotsFade();
 }
@@ -700,7 +714,9 @@ async function classify(target, slotEl) {
   try {
     const destDir = target.path.endsWith('/') ? target.path : target.path + '/';
     const res = await place(f.href, f.name, f.size, destDir);
-    S.last = { backDir: S.cwd, name: res.finalName, from: res.destHref, mode: res.mode };
+    S.undoStack.push({ backDir: S.cwd, name: res.finalName, from: res.destHref, mode: res.mode });
+    if (S.undoStack.length > MAX_UNDO) S.undoStack.shift();
+    scheduleSave();                         // 撤销栈也存进 NAS，刷新/换设备后仍可撤销
     if (S.counts[target.path] != null) S.counts[target.path] += 1;
     if (navigator.vibrate) navigator.vibrate(12);
     const renamed = res.finalName !== f.name;
@@ -720,17 +736,19 @@ async function classify(target, slotEl) {
 }
 
 async function undo() {
-  if (S.busy || !S.last) return;
-  const rec = S.last;                       // 先抓住，避免下面被清掉
+  if (S.busy) return;
+  const rec = S.undoStack[S.undoStack.length - 1];
+  if (!rec) { toast('没有可撤销的操作', 'warn'); return; }
   S.busy = true;
   toast('撤销中…', '', 1200);
-  let done = false;
+  let done = false, gone = false;
   try {
     const back = joinEnc(rec.backDir, rec.name);
     const tryIt = async (method) => (await fetch(rec.from, { method, credentials:'same-origin',
       headers:{ 'Destination': ORIGIN + back, 'Overwrite':'F' } })).status;
     let st = await tryIt('MOVE');
     if (st === 412) throw new Error('原位置已有同名文件，撤销中止（没有改动任何文件）');
+    if (st === 404) { gone = true; throw new Error('这一步的文件已不在原目标位置（可能被别的程序移动过），已跳过'); }
     if (st === 405 || st === 502 || st === 500) {
       st = await tryIt('COPY');
       if (st >= 200 && st < 300) {
@@ -741,17 +759,25 @@ async function undo() {
       }
     }
     if (!(st >= 200 && st < 300)) throw new Error('撤销失败 HTTP ' + st);
-    S.last = null;
     done = true;
   } catch (e) {
-    toast(e.message, 'err', 5000);
+    if (gone) { dropUndo(rec); }                 // 这一步已无法撤销，弹掉它，免得卡住后面几十步
+    toast(e.message, gone ? 'warn' : 'err', 5000);
   } finally {
-    S.busy = false;                         // ★ 必须先释放，否则下面的 openSource 会被 busy 挡掉
+    S.busy = false;                             // ★ 必须先释放，openSource 才不会被 busy 挡掉
   }
   if (done) {
-    toast('已撤销', 'ok', 1600);
-    await openSource(S.cwd);                // 此时 busy=false，才会真的重新拉取目录
+    dropUndo(rec);
+    toast(S.undoStack.length ? `已撤销（还可撤销 ${S.undoStack.length} 步）` : '已撤销', 'ok', 1600);
+    await openSource(S.cwd);
   }
+}
+
+function dropUndo(rec) {
+  const i = S.undoStack.lastIndexOf(rec);
+  if (i >= 0) S.undoStack.splice(i, 1);
+  scheduleSave();
+  renderSlots();
 }
 
 /* ---------------- 设置面板 ---------------- */
