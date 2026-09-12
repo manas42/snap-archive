@@ -288,7 +288,7 @@
       <div class="grp">待分类目录（源）</div>
       <div id="setupSource"></div>
 
-      <div class="grp" style="margin-top:18px">目标目录（12 个槽位）</div>
+      <div class="grp" style="margin-top:18px">目标目录（<span id="slotN">20</span> 个槽位）</div>
       <div style="display:flex;gap:6px;margin-bottom:10px">
         <button class="btn" id="batchBtn" style="flex:1">☑ 批量勾选子目录</button>
         <button class="btn ghost" id="fillBtn" style="flex:0 0 auto">填充空槽</button>
@@ -1128,6 +1128,7 @@ async function deleteSourceDir() {
 /* ---------------- 设置面板 ---------------- */
 function openSetup() {
   S.swapMode = null; S.swapFirst = -1;      // 每次打开都从普通模式开始
+  const sn = $('slotN'); if (sn) sn.textContent = SLOT_N;   // 槽位文案跟着常量走，避免再次漂移
   renderSetup();
   updateAutoplayUI();
   updateFsUI();
@@ -1488,7 +1489,7 @@ function applyBatch() {
   $('setupSheet').classList.add('on');
   const bits = [`已加入 ${added} 个`];
   if (dup) bits.push(`跳过 ${dup} 个（已在槽位里）`);
-  if (full) bits.push(`${full} 个没地方放（12 个槽位已满）`);
+  if (full) bits.push(`${full} 个没地方放（${SLOT_N} 个槽位已满）`);
   toast(bits.join('，'), full ? 'warn' : 'ok', 4000);
   refreshCounts();
 }
