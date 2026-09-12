@@ -14,7 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-NAS_HOST="${NAS_HOST:-192.0.2.10}"
+NAS_HOST="${NAS_HOST:-}"          # 真实值放 .nas-cred（该文件不入库），不要写进本脚本
 WEBDAV_PORT="${WEBDAV_PORT:-5005}"
 CRED_FILE=".nas-cred"
 
@@ -54,6 +54,16 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   esac
 done < "$CRED_FILE"
 : "${NAS_USER:?缺少 NAS_USER}"; : "${NAS_PASS:?缺少 NAS_PASS}"
+if [[ -z "$NAS_HOST" ]]; then
+  cat <<'EOF' >&2
+❌ 不知道 NAS 的地址。请在 .nas-cred 里补上（真实地址不入库，所以不写在脚本里）：
+
+     NAS_HOST=你的NAS地址          # 也接受 host: 或 ip:
+     WEBDAV_PORT=5005              # 可选，默认 5005
+
+EOF
+  exit 1
+fi
 
 CURLRC="$(mktemp)"; chmod 600 "$CURLRC"
 printf 'user = "%s:%s"\n' "$NAS_USER" "$NAS_PASS" > "$CURLRC"

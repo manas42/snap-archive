@@ -155,9 +155,14 @@
   .item .txt span{display:block;font-size:10.5px;color:var(--dim-2);word-break:break-all}
   .item .acts{flex:0 0 auto;display:flex;gap:5px}
   .item .acts .btn{min-height:34px;padding:0 9px;font-size:11.5px}
-  .item .ck{flex:0 0 auto;width:26px;height:26px;border-radius:8px;border:1.5px solid var(--line);
-    display:flex;align-items:center;justify-content:center;font-size:14px;color:transparent;background:var(--panel-2)}
-  .item.on .ck{background:var(--acc);border-color:var(--acc);color:#04121f}
+  /* 左侧勾选框：够大好点，且只有点它才是"选中"（点行的其它地方＝进入目录） */
+  .item .ck{flex:0 0 42px;width:42px;height:42px;margin-right:2px;border-radius:10px;
+    border:1.5px solid var(--line);background:var(--panel-2);
+    display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;
+    color:transparent;transition:transform .08s ease,background .15s ease}
+  .item .ck:active{transform:scale(.9)}
+  .item .ck.on{background:var(--acc);border-color:var(--acc);color:#04121f}
+  .item .chev{flex:0 0 auto;color:var(--dim-2);font-size:22px;line-height:1;padding:0 6px}
   .picker{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
   .picker .ico{flex:0 0 auto;font-size:17px}
   .picker .txt{flex:1;min-width:0}
@@ -752,30 +757,68 @@ async function pickerLoad(dir) {
 
 function renderPickerList() {
   const box = $('bList'); box.innerHTML = '';
-  if (!pickerDirs.length) { box.innerHTML = '<div class="note">这个目录下没有子目录</div>'; return; }
   const batch = S.pick.mode === 'batch';
+  if (!pickerDirs.length) {
+    box.innerHTML = '<div class="note">这个目录下没有子目录<br>（可以点上面的 ↑ 回上一层）</div>';
+    if (batch) updateBatchHint();
+    return;
+  }
   pickerDirs.forEach((d) => {
+    const on = batch && S.pick.chosen.has(d.href);
     const row = document.createElement('div');
-    row.className = 'item' + (batch && S.pick.chosen.has(d.href) ? ' on' : '');
-    row.innerHTML = (batch ? '<span class="ck">✓</span>' : '<span class="idx">📁</span>')
-      + `<span class="txt"><b>${esc(d.name)}</b><span>${esc(dec(d.href))}</span></span>`;
-    if (!batch) {
+    row.className = 'item' + (on ? ' on' : '');
+
+    if (batch) {
+      // 左侧方框：只有点它才是「选中/取消」
+      const ck = document.createElement('button');
+      ck.type = 'button';
+      ck.className = 'ck' + (on ? ' on' : '');
+      ck.textContent = on ? '✓' : '';
+      ck.setAttribute('aria-label', on ? '取消选择' : '选择');
+      ck.onclick = (e) => { e.stopPropagation(); toggleChosen(d.href); };
+      row.append(ck);
+    } else {
+      const ico = document.createElement('span');
+      ico.className = 'idx'; ico.textContent = '📁';
+      row.append(ico);
+    }
+
+    const txt = document.createElement('span');
+    txt.className = 'txt';
+    txt.innerHTML = `<b>${esc(d.name)}</b><span>${esc(dec(d.href))}</span>`;
+    row.append(txt);
+
+    if (batch) {
+      const chev = document.createElement('span');
+      chev.className = 'chev'; chev.textContent = '›';
+      row.append(chev);
+    } else {
       const acts = document.createElement('span'); acts.className = 'acts';
-      const pick = document.createElement('button'); pick.className = 'btn'; pick.textContent = '选它';
+      const pick = document.createElement('button');
+      pick.className = 'btn'; pick.textContent = '选它';
       pick.onclick = (e) => { e.stopPropagation(); commitPick(d.href); };
       acts.append(pick);
       row.append(acts);
     }
-    row.onclick = () => {
-      if (batch) {
-        S.pick.chosen.has(d.href) ? S.pick.chosen.delete(d.href) : S.pick.chosen.add(d.href);
-        renderPickerList(); renderPickerFoot();
-      } else {
-        pickerLoad(d.href);
-      }
-    };
+
+    // 点这一行（名字区域）＝进入该目录 —— 批量模式下也一样
+    row.onclick = () => pickerLoad(d.href);
     box.append(row);
   });
+  if (batch) updateBatchHint();
+}
+
+function toggleChosen(href) {
+  S.pick.chosen.has(href) ? S.pick.chosen.delete(href) : S.pick.chosen.add(href);
+  renderPickerList(); renderPickerFoot();
+}
+
+/** 批量模式：把"已选 N 个"写在提示行上，边勾边看得见 */
+function updateBatchHint() {
+  const n = S.pick.chosen.size;
+  $('bHint').innerHTML = `已选 <b style="color:#4c9aff">${n}</b> 个 —— `
+    + `点一行＝<b>进入</b>该目录，勾选请点每行<b>左边的方框</b>。`
+    + (n ? ' 选好后点右下角一次加入空槽位。' : '');
 }
 
 function commitPick(path) {
