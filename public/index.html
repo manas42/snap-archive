@@ -252,7 +252,13 @@
   <div class="card">
     <h2><span>⚙ 目录设置</span><span class="sp"></span><button class="btn ghost icon" data-close="setupSheet">✕</button></h2>
     <div class="body">
-      <div class="grp">媒体类型</div>
+      <div class="grp">播放</div>
+      <div class="item">
+        <span class="txt"><b>视频自动播放</b><span>翻到视频时自动开始播放。手机浏览器通常要求静音才允许自动播放，被拒绝时会显示 ▶ 按钮等你点。</span></span>
+        <button class="btn" id="autoplayBtn">开</button>
+      </div>
+
+      <div class="grp" style="margin-top:14px">媒体类型</div>
       <div class="seg">
         <button class="btn" id="filter_all">图片 + 视频</button>
         <button class="btn" id="filter_image">仅图片</button>
@@ -324,6 +330,7 @@ const DIR = location.pathname.replace(/[^/]*$/, '');       // 本页所在目录
 const CFG_URL = ORIGIN + DIR + 'snap-config.json';   // 绝对 URL：页面若从带凭据的 URL 打开，相对 URL 会让 fetch 直接抛错
 const CFG_LS = 'snap.config.cache';
 const FILTER_LS = 'snap.filter';
+const AUTOPLAY_LS = 'snap.autoplay';
 const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
 const VID = new Set(['mp4','webm']);
@@ -343,7 +350,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c)=>({'&':'&amp;','<':'&lt;','>
 const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() || '/');
 
 const S = {
-  cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all',
+  cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true,
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
   undoStack: [], busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
@@ -418,7 +425,7 @@ async function place(srcHref, srcName, srcSize, destDir) {
 
   if (mv.status === 405 || mv.status === 502 || mv.status === 500) {
     const cp = await attempt('COPY');
-    if (!cp.ok) throw new Error(`跨盘复制失败 HTTP ${cp.status} ${cp.body||''}`);
+    if (!cp.ok) { const e = new Error(`跨盘复制失败 HTTP ${cp.status} ${cp.body||''}`); e.status = cp.status; throw e; }
     const info = await statOf(ORIGIN + cp.destHref);
     if (!info || info.dir) throw new Error('复制后目标不存在 —— 已保留源文件，未删除');
     if (srcSize > 0 && info.size !== srcSize)
@@ -428,13 +435,16 @@ async function place(srcHref, srcName, srcSize, destDir) {
       throw new Error('复制成功但删除源失败：目标已有副本、源仍在，请手动处理');
     return { ...cp, mode:'copy' };
   }
-  throw new Error(`移动失败 HTTP ${mv.status} ${mv.body||''}`);
+  const err = new Error(`移动失败 HTTP ${mv.status} ${mv.body||''}`);
+  err.status = mv.status;                    // 让调用方区分"文件已经不在了(404)"
+  throw err;
 }
 
 /* ---------------- 配置：存在 NAS 上 ---------------- */
 function snapshot() {
   return {
-    version: 1, source: S.source, targets: S.targets, del: S.del, filter: S.filter,
+    version: 1, source: S.source, targets: S.targets, del: S.del,
+    filter: S.filter, autoplay: S.autoplay,
     undo: S.undoStack.slice(-MAX_UNDO),          // 撤销栈也持久化，刷新/换设备后还能继续撤销
     updated: new Date().toISOString(),
   };
@@ -449,6 +459,7 @@ function applyConfig(c) {
   }
   if (c.del && c.del.path) S.del = { path:c.del.path, name:c.del.name || labelOf(c.del.path) };
   if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
+  if (typeof c.autoplay === 'boolean') S.autoplay = c.autoplay;
   if (Array.isArray(c.undo)) {
     S.undoStack = c.undo
       .filter((r) => r && typeof r.backDir === 'string' && typeof r.name === 'string' && typeof r.from === 'string')
@@ -511,7 +522,7 @@ async function openSource(dir) {
     S.dirs = items.filter((e) => e.dir);
     S.raw = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
     S.raw.sort((a,b) => b.mtime - a.mtime);
-    applyFilter(false);
+    showList(true);                     // 换目录后从第 1 个开始
     if (!S.dirty) setSync('', '已同步');
   } catch (e) {
     toast(e.message, 'err', 5000);
@@ -521,14 +532,20 @@ async function openSource(dir) {
 
 /* 媒体类型筛选：all=图片+视频 / image=仅图片 / video=仅视频
    S.raw 是目录里的全部媒体，S.files 是筛选后的结果 */
-function applyFilter(keepCurrent = true) {
-  const cur = keepCurrent ? S.files[S.index] : null;
+/* 媒体类型筛选：all=图片+视频 / image=仅图片 / video=仅视频
+   S.raw 是目录里的全部媒体（唯一事实来源），S.files 是筛选后的可见列表。
+   注意：移动文件时必须同时从 S.raw 里删掉，否则切换筛选会让已移走的图"复活"，
+   再去点它就是 404。 */
+function buildFiles() {
   const f = S.filter;
   S.files = S.raw.filter((e) => f === 'all' ? true
     : f === 'image' ? IMG.has(extOf(e.name)) : VID.has(extOf(e.name)));
-  let i = cur ? S.files.findIndex((e) => e.href === cur.href) : -1;
-  if (i < 0) i = Math.min(S.index, Math.max(0, S.files.length - 1));
-  S.index = i;
+}
+
+/** 重算列表并渲染。resetIndex=true 时回到第 1 个（切换媒体类型用） */
+function showList(resetIndex) {
+  buildFiles();
+  S.index = resetIndex ? 0 : Math.min(S.index, Math.max(0, S.files.length - 1));
   updateFilterUI();
   render();
   preload();
@@ -548,9 +565,28 @@ function setFilter(f) {
   if (!['all','image','video'].includes(f)) f = 'all';
   S.filter = f;
   try { localStorage.setItem(FILTER_LS, f); } catch(e){}
-  applyFilter(true);
+  showList(true);                       // ★ 切换后回到列表第 1 个
   scheduleSave();                       // 顺手存进 NAS 上的配置
-  toast('媒体类型：' + ({all:'图片 + 视频', image:'仅图片', video:'仅视频'}[f]), 'ok', 1400);
+  toast('媒体类型：' + ({all:'图片 + 视频', image:'仅图片', video:'仅视频'}[f])
+    + (S.files.length ? `（${S.files.length} 个）` : '（没有）'), 'ok', 1400);
+}
+
+/* 视频自动播放开关（与桌面版语义一致：只影响主图，缩略图永不自动播） */
+function updateAutoplayUI() {
+  const b = $('autoplayBtn');
+  if (!b) return;
+  b.textContent = S.autoplay ? '开' : '关';
+  b.classList.toggle('on', S.autoplay);
+  b.style.borderColor = S.autoplay ? 'var(--ok)' : 'var(--line)';
+  b.style.color = S.autoplay ? 'var(--ok)' : 'var(--dim)';
+}
+function setAutoplay(v) {
+  S.autoplay = !!v;
+  try { localStorage.setItem(AUTOPLAY_LS, S.autoplay ? '1' : '0'); } catch(e){}
+  updateAutoplayUI();
+  scheduleSave();
+  renderStage();                        // 立刻生效：打开就播，关闭就停在首帧
+  toast('视频自动播放：' + (S.autoplay ? '开' : '关'), 'ok', 1400);
 }
 
 function preload() {
@@ -618,6 +654,7 @@ function renderStage() {
     el.addEventListener('pause', () => pb.classList.remove('hidden'));
     el.addEventListener('ended', () => pb.classList.remove('hidden'));
     st.insertBefore(pb, $('badge'));
+    if (S.autoplay) el.play().catch(() => {});   // 被浏览器拒绝时播放键仍在，等用户点
   }
   renderBadge(f);
 }
@@ -722,6 +759,10 @@ async function classify(target, slotEl) {
     const renamed = res.finalName !== f.name;
     toast(`已移到「${target.name}」${renamed ? '，改名为 ' + res.finalName : ''}${res.mode==='copy' ? '（跨盘复制）' : ''}`, 'ok', 1800);
     S.files.splice(S.index, 1);
+    // ★ 必须同时从 S.raw 里删掉：否则切换媒体类型时 buildFiles() 会把它重新算回来，
+    //   列表里就出现"已经移走的图片"，再去点它必然 404
+    const k = S.raw.findIndex((e) => e.href === f.href);
+    if (k >= 0) S.raw.splice(k, 1);
     if (S.index >= S.files.length) S.index = Math.max(0, S.files.length-1);
     render(); preload();
     // 闪光必须放在 render 之后：renderSlots 会重设 className，先加会被冲掉
@@ -731,7 +772,18 @@ async function classify(target, slotEl) {
     }
     updateSlotsFade();      // 计数文字变化可能影响是否需要滚动提示
   } catch (e) {
-    toast(e.message, 'err', 5000);
+    if (e.status === 404) {
+      // 源文件已经不在（多半是别处移走了）：从列表里摘掉它，别让用户反复点、反复报错
+      toast('这个文件已不在源目录，已从列表移除', 'warn', 4000);
+      const j = S.raw.findIndex((x) => x.href === f.href);
+      if (j >= 0) S.raw.splice(j, 1);
+      const i2 = S.files.findIndex((x) => x.href === f.href);
+      if (i2 >= 0) S.files.splice(i2, 1);
+      if (S.index >= S.files.length) S.index = Math.max(0, S.files.length - 1);
+      render(); preload();
+    } else {
+      toast(e.message, 'err', 5000);
+    }
   } finally { S.busy = false; }
 }
 
@@ -783,6 +835,7 @@ function dropUndo(rec) {
 /* ---------------- 设置面板 ---------------- */
 function openSetup() {
   renderSetup();
+  updateAutoplayUI();
   $('setupSheet').classList.add('on');
   refreshCounts();
 }
@@ -805,21 +858,21 @@ function renderSetup() {
 
   const sb = $('setupSource'); sb.innerHTML = '';
   sb.append(rowFor('源', S.source,
-    () => openPicker('source', -1),
+    () => openPicker('source', -1, 'setup'),
     () => setSource(S.cwd),
     () => { S.source = null; scheduleSave(); renderSetup(); renderHeader(); }));
 
   const tb = $('setupTargets'); tb.innerHTML = '';
   for (let i=0;i<SLOT_N;i++) {
     tb.append(rowFor(String(i+1), S.targets[i],
-      () => openPicker('slot', i),
+      () => openPicker('slot', i, 'setup'),
       () => setTarget(i, S.cwd),
       () => { S.targets[i] = null; scheduleSave(); renderSetup(); renderSlots(); }));
   }
 
   const db = $('setupDel'); db.innerHTML = '';
   db.append(rowFor('🗑', S.del,
-    () => openPicker('del', -1),
+    () => openPicker('del', -1, 'setup'),
     () => setDel(S.cwd),
     () => { S.del = null; scheduleSave(); renderSetup(); }));
 
@@ -845,8 +898,8 @@ async function refreshCounts() {
 }
 
 /* ---------------- 目录浏览器（选源 / 选槽位 / 批量勾选） ---------------- */
-function openPicker(mode, slot) {
-  S.pick = { mode, slot, dir:'/', chosen:new Set() };
+function openPicker(mode, slot, from) {
+  S.pick = { mode, slot, dir:'/', chosen:new Set(), from: from || 'main' };
   $('setupSheet').classList.remove('on');
   $('browseSheet').classList.add('on');
   renderPickerFoot();
@@ -879,7 +932,7 @@ function renderPickerFoot() {
     foot.append(cancel, ok);
     if (m === 'slot') {
       const batch = document.createElement('button'); batch.className='btn'; batch.textContent='☑ 批量';
-      batch.onclick = () => { S.pick = { mode:'batch', slot:-1, dir:S.pick.dir, chosen:new Set() }; renderPickerFoot(); pickerLoad(S.pick.dir); };
+      batch.onclick = () => { S.pick = { mode:'batch', slot:-1, dir:S.pick.dir, chosen:new Set(), from:S.pick.from }; renderPickerFoot(); pickerLoad(S.pick.dir); };
       foot.insertBefore(batch, ok);
     }
   }
@@ -976,12 +1029,13 @@ function updateBatchHint() {
 
 function commitPick(path) {
   if (!path) { toast('请先进入一个目录', 'warn'); return; }
-  const m = S.pick.mode;
+  const m = S.pick.mode, from = S.pick.from;
   if (m === 'source') setSource(path);
   else if (m === 'del') setDel(path);
   else if (m === 'slot') setTarget(S.pick.slot, path);
   $('browseSheet').classList.remove('on');
-  $('setupSheet').classList.add('on');
+  // 从主界面进来选源目录的：选完直接回主界面，不要把设置面板顶出来
+  if (from === 'setup') $('setupSheet').classList.add('on');
   renderSetup(); renderSlots();
   if (m === 'source') { S.index = 0; openSource(path); }
   refreshCounts();
@@ -1014,6 +1068,7 @@ function applyBatch() {
 $('srcBtn').onclick = () => openPicker('source', -1);
 $('filterChip').onclick = () => setFilter(S.filter === 'all' ? 'image' : S.filter === 'image' ? 'video' : 'all');
 ['all','image','video'].forEach((k) => { const b = $('filter_' + k); if (b) b.onclick = () => setFilter(k); });
+$('autoplayBtn').onclick = () => setAutoplay(!S.autoplay);
 $('undo').onclick = undo;
 $('discard').onclick = () => {
   if (!S.del) { toast('还没设置「丢弃」目录，去 ⚙ 设置里选一个', 'warn'); openSetup(); return; }
@@ -1021,7 +1076,7 @@ $('discard').onclick = () => {
   classify(S.del, null);
 };
 $('setup').onclick = openSetup;
-$('batchBtn').onclick = () => openPicker('batch', -1);
+$('batchBtn').onclick = () => openPicker('batch', -1, 'setup');
 $('fillBtn').onclick = () => {
   if (!S.cwd) { toast('先选一个待分类目录', 'warn'); return; }
   let n = 0;
@@ -1049,7 +1104,8 @@ window.addEventListener('resize', updateSlotsFade);
 document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => {
     $(b.dataset.close).classList.remove('on');
-    if (b.dataset.close === 'browseSheet' && S.pick.mode !== 'batch') $('setupSheet').classList.add('on');
+    // 只有从设置面板里打开的浏览器，取消/关闭后才回设置面板；从主界面进来的就回主界面
+    if (b.dataset.close === 'browseSheet' && S.pick.from === 'setup') $('setupSheet').classList.add('on');
   };
 });
 
@@ -1070,8 +1126,10 @@ document.addEventListener('keydown', (e) => {
   // 先用浏览器缓存（配置 + 媒体类型）瞬间渲染，再以 NAS 上的配置为准
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
   try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
+  try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}
   buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
   updateFilterUI();
+  updateAutoplayUI();
   renderSlots(); renderHeader();
   setSync('on', '载入配置…');
   await loadConfig();
