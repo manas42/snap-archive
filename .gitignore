@@ -11,3 +11,11 @@ nas-creds
 docs/
 *.local.md
 .certs/
+
+# 本地运维/实验脚本：只保留在本地，不入库
+# （仓库里只留 public/index.html 这个应用本身 + tools/deploy-webdav.sh 部署脚本）
+tools/nas-probe.sh
+tools/phone-probe.html
+tools/serve-https.mjs
+tools/count-coupling.mjs
+tools/slice/
