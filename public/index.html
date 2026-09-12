@@ -1016,10 +1016,13 @@ async function undo() {
     if (st === 412) throw new Error('原位置已有同名文件，撤销中止（没有改动任何文件）');
     if (st === 404) { gone = true; throw new Error('这一步的文件已不在原目标位置（可能被别的程序移动过），已跳过'); }
     if (st === 405 || st === 502 || st === 500) {
+      const before = await statOf(ORIGIN + rec.from);      // 回拷前记下原大小，用于校验
       st = await tryIt('COPY');
       if (st >= 200 && st < 300) {
         const info = await statOf(ORIGIN + back);
-        if (!info) throw new Error('回拷校验失败 —— 原副本仍在目标位置，未删除');
+        if (!info || info.dir) throw new Error('回拷校验失败 —— 原副本仍在目标位置，未删除');
+        if (before && before.size > 0 && info.size !== before.size)
+          throw new Error(`回拷后大小不一致（原 ${before.size} / 新 ${info.size}）—— 目标位置的文件已保留，未删除`);
         const d = await fetch(rec.from, { method:'DELETE', credentials:'same-origin' });
         if (d.status !== 204 && d.status !== 200) throw new Error('回拷成功但清理失败，请手动检查');
       }
@@ -1198,7 +1201,7 @@ function renderSetup() {
     sb.append(db);
   }
 
-  // ---- 12/20 个槽位 ----
+  // ---- 全部槽位 ----
   const tb = $('setupTargets'); tb.innerHTML = '';
   for (let i = 0; i < SLOT_N; i++) tb.append(rowFor(String(i + 1), S.targets[i], i));
 
@@ -1475,20 +1478,27 @@ function commitPick(path) {
 function applyBatch() {
   const chosen = Array.from(S.pick.chosen);
   if (!chosen.length) return;
-  const existing = new Set(S.targets.filter(Boolean).map((t)=>t.path));
-  let added = 0, dup = 0, full = 0;
+  const existing = new Set(S.targets.filter(Boolean).map((t)=>normPath(t.path)));
+  // 源目录与丢弃目录不能同时当目标（会"移进自己"），批量添加也要挡住
+  const blocked = new Set();
+  if (S.source && S.source.path) blocked.add(normPath(S.source.path));
+  if (S.del && S.del.path) blocked.add(normPath(S.del.path));
+  let added = 0, dup = 0, full = 0, conflict = 0;
   for (const href of chosen) {
-    if (existing.has(href)) { dup++; continue; }
+    const p2 = normPath(href);
+    if (existing.has(p2)) { dup++; continue; }
+    if (blocked.has(p2)) { conflict++; continue; }
     const i = S.targets.findIndex((t) => !t);
     if (i < 0) { full++; continue; }
-    S.targets[i] = { path: href, name: labelOf(href) };
-    existing.add(href); added++;
+    S.targets[i] = { path: p2, name: labelOf(href) };
+    existing.add(p2); added++;
   }
   scheduleSave(); renderSetup(); renderSlots();
   $('browseSheet').classList.remove('on');
   $('setupSheet').classList.add('on');
   const bits = [`已加入 ${added} 个`];
   if (dup) bits.push(`跳过 ${dup} 个（已在槽位里）`);
+  if (conflict) bits.push(`${conflict} 个是源目录或丢弃目录，不能当目标`);
   if (full) bits.push(`${full} 个没地方放（${SLOT_N} 个槽位已满）`);
   toast(bits.join('，'), full ? 'warn' : 'ok', 4000);
   refreshCounts();
@@ -1527,16 +1537,19 @@ $('clearTargets').onclick = () => {
 $('batchBtn').onclick = () => openPicker('batch', -1, 'setup');
 $('fillBtn').onclick = () => {
   if (!S.cwd) { toast('先选一个待分类目录', 'warn'); return; }
-  let n = 0;
+  let n = 0, skipped = 0;
   for (const d of S.dirs) {
     if (S.targets.every((t)=>t)) break;
-    if (S.targets.some((t)=>t && t.path === d.href)) continue;
+    const p2 = normPath(d.href);
+    if (S.targets.some((t)=>t && normPath(t.path) === p2)) continue;
+    if ((S.source && normPath(S.source.path) === p2) || (S.del && normPath(S.del.path) === p2)) { skipped++; continue; }
     const i = S.targets.findIndex((t)=>!t);
     if (i < 0) break;
-    S.targets[i] = { path:d.href, name:d.name }; n++;
+    S.targets[i] = { path: p2, name: d.name }; n++;
   }
   scheduleSave(); renderSetup(); renderSlots();
-  toast(n ? `用当前目录的子目录填充了 ${n} 个空槽位` : '没有可填充的子目录（或槽位已满）', n ? 'ok' : 'warn');
+  toast(n ? `用当前目录的子目录填充了 ${n} 个空槽位` + (skipped ? `（跳过 ${skipped} 个源/丢弃目录）` : '')
+          : '没有可填充的子目录（或槽位已满）', n ? 'ok' : 'warn');
   refreshCounts();
 };
 $('clearAll').onclick = () => {
