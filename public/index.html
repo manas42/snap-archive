@@ -78,8 +78,10 @@
   .srcbtn .t{flex:1;min-width:0}
   .srcbtn .t .n{display:block;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .srcbtn .t .p{display:block;font-size:10.5px;color:var(--dim-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
-  .sync{flex:0 0 auto;font-size:10.5px;color:var(--dim-2);min-width:52px;text-align:right;line-height:1.3}
-  .sync.ok{color:var(--ok)} .sync.err{color:var(--bad)} .sync.on{color:var(--warn)}
+  .hdrbtn{flex:0 0 auto;min-width:46px;min-height:44px;padding:0 8px;border-radius:var(--r-sm);
+    background:linear-gradient(180deg,var(--panel-3),var(--panel-2));border:1px solid var(--line);
+    color:var(--fg);font-size:18px;line-height:1;transition:transform .08s ease}
+  .hdrbtn:active{transform:scale(.94)}
 
   /* ---------- 主区 ---------- */
   main{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -236,7 +238,7 @@
     <span class="ico" style="opacity:.5">▾</span>
   </button>
   <button class="chip" id="filterChip" data-f="all" title="切换媒体类型（图片 / 视频 / 两者）">图+视</button>
-  <div class="sync" id="sync">—</div>
+  <button class="hdrbtn" id="gridOpen" title="图集：分页浏览当前目录">▦</button>
 </header>
 
 <main>
@@ -257,7 +259,6 @@
   <div class="tools">
     <button class="btn" id="undo">↶ 撤销</button>
     <button class="btn" id="discard">🗑 丢弃</button>
-    <button class="btn" id="gridOpen">▦ 图集</button>
     <button class="btn primary" id="setup">⚙ 设置</button>
   </div>
 </footer>
@@ -286,8 +287,10 @@
       <div class="grp" style="margin-top:18px">目标目录（12 个槽位）</div>
       <div style="display:flex;gap:6px;margin-bottom:10px">
         <button class="btn" id="batchBtn" style="flex:1">☑ 批量勾选子目录</button>
-        <button class="btn ghost" id="fillBtn" style="flex:0 0 auto">用当前目录填充空槽</button>
+        <button class="btn ghost" id="fillBtn" style="flex:0 0 auto">填充空槽</button>
+        <button class="btn ghost" id="swapBtn" style="flex:0 0 auto">⇅ 调整顺序</button>
       </div>
+      <div class="note" id="swapHint" style="display:none;padding:2px 2px 10px"></div>
       <div id="setupTargets"></div>
 
       <div class="grp" style="margin-top:18px">丢弃目录</div>
@@ -389,7 +392,7 @@ const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() ||
 
 const S = {
   cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true,
-  sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null,
+  sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null, swapMode: null, swapFirst: -1,
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
   undoStack: [], busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
@@ -402,8 +405,10 @@ function toast(msg, kind, ms) {
   t.textContent = msg; t.className = 'toast show ' + (kind||'');
   clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.className='toast'; }, ms || 3000);
 }
+/** 顶栏原来有个「已同步 / 保存中 / 读取中」的小字，按需求去掉了。
+ *  这里只保留"出错要让人知道"，其余状态一律忽略。 */
 function setSync(state, text) {
-  const el = $('sync'); el.className = 'sync ' + (state||''); el.textContent = text;
+  if (state === 'err') toast(text, 'err', 5000);
 }
 
 /* ---------------- WebDAV 原语 ---------------- */
@@ -526,15 +531,14 @@ async function loadConfig() {
       const c = JSON.parse(await r.text());
       applyConfig(c);
       if (configCleaned) scheduleSave();     // 清理过重复记录就顺手存回去
-      setSync('ok', '配置已载入');
       return true;
     }
-    if (r.status === 404) { setSync('', '首次使用'); return false; }
-    setSync('err', '读取失败 ' + r.status);
+    if (r.status === 404) return false;            // 首次使用：没有配置文件是正常的
+    setSync('err', `配置读取失败 HTTP ${r.status}（先用本地缓存）`);
   } catch (e) {
     // 退回浏览器缓存，至少别丢配置
     try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(_) {}
-    setSync('err', '读取失败');
+    setSync('err', '配置读取失败（先用本地缓存）');
   }
   return false;
 }
@@ -558,8 +562,7 @@ async function saveConfig() {
     setSync('ok', '已存到 NAS');
     try { localStorage.setItem(CFG_LS, JSON.stringify(snapshot())); } catch(e){}
   } catch (e) {
-    setSync('err', '保存失败');
-    toast('配置没能保存到 NAS：' + e.message + '（下次打开可能丢失）', 'err', 5000);
+    setSync('err', '配置没能保存到 NAS：' + e.message + '（下次打开可能丢失）');
   } finally { S.saving = false; }
 }
 
@@ -570,7 +573,6 @@ async function saveConfig() {
 async function openSource(dir, force) {
   if (S.busy && !force) return;
   S.busy = true;
-  setSync(S.dirty ? 'on' : '', S.dirty ? '待保存…' : '读取中…');
   try {
     const list = await propfind(ORIGIN + dir, 1);
     if (!list) throw new Error('目录不存在');
@@ -579,10 +581,8 @@ async function openSource(dir, force) {
     S.dirs = items.filter((e) => e.dir);
     S.raw = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
     showList(true);                     // 换目录后从第 1 个开始（内部会按当前排序规则排好）
-    if (!S.dirty) setSync('', '已同步');
   } catch (e) {
     toast(e.message, 'err', 5000);
-    setSync('err', '读取失败');
   } finally { S.busy = false; }
 }
 
@@ -1064,6 +1064,7 @@ async function deleteSourceDir() {
 
 /* ---------------- 设置面板 ---------------- */
 function openSetup() {
+  S.swapMode = null; S.swapFirst = -1;      // 每次打开都从普通模式开始
   renderSetup();
   updateAutoplayUI();
   $('setupSheet').classList.add('on');
@@ -1071,8 +1072,14 @@ function openSetup() {
 }
 function renderSetup() {
   const srcPool = S.cwd ? poolOf(S.cwd) : null;
+  const mode = S.swapMode;                    // null | 'slot'（调顺序）| 'source'（源与目标互换）
+  const mk = (txt, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'btn ' + (cls || ''); b.textContent = txt; b.onclick = fn; return b;
+  };
 
-  const rowFor = (label, val, onBrowse, onCurrent, onClear) => {
+  /** idx: -2=源, -1=丢弃, >=0=槽位序号 */
+  const rowFor = (label, val, idx) => {
     const r = document.createElement('div'); r.className = 'item';
     const xd = val && srcPool && poolOf(val.path) !== srcPool;
     r.innerHTML = `<span class="idx">${label}</span>
@@ -1080,46 +1087,105 @@ function renderSetup() {
         ? `<b>${esc(val.name)}${xd ? ' <span style="color:#e3b341">⚠跨盘</span>' : ''}</b><span>${esc(dec(val.path))}</span>`
         : `<span style="color:#63707e">未设置</span>`}</span>`;
     const acts = document.createElement('span'); acts.className = 'acts';
-    const mk = (txt, fn, cls) => { const b = document.createElement('button'); b.className = 'btn ' + (cls||''); b.textContent = txt; b.onclick = fn; return b; };
-    acts.append(mk('浏览', onBrowse), mk('当前', onCurrent), mk('清', onClear, 'ghost'));
+
+    if (mode === 'slot' && idx >= 0) {
+      // 调整顺序：先选一个槽位，再点另一个即交换（可以和空槽位换）
+      const picked = S.swapFirst === idx;
+      acts.append(mk(picked ? '已选' : '选它', () => {
+        if (S.swapFirst < 0) { S.swapFirst = idx; renderSetup(); }
+        else { const a = S.swapFirst; S.swapFirst = -1; doSwapSlots(a, idx); }
+      }, picked ? 'primary' : ''));
+    } else if (mode === 'source' && idx >= 0) {
+      // 源与目标互换：点哪个槽位，就把那个目录当新的待分类目录
+      acts.append(mk('换它', () => doSwapSourceWithSlot(idx), val ? '' : 'ghost'));
+    } else {
+      const onBrowse = idx === -2 ? () => openPicker('source', -1, 'setup')
+                     : idx === -1 ? () => openPicker('del', -1, 'setup')
+                     : () => openPicker('slot', idx, 'setup');
+      const onCurrent = idx === -2 ? () => setSource(S.cwd)
+                      : idx === -1 ? () => setDel(S.cwd)
+                      : () => setTarget(idx, S.cwd);
+      const onClear = idx === -2 ? () => setSource(null)
+                    : idx === -1 ? () => setDel(null)
+                    : () => setTarget(idx, null);
+      acts.append(mk('浏览', onBrowse), mk('当前', onCurrent), mk('清', onClear, 'ghost'));
+    }
     r.append(acts);
     return r;
   };
 
+  // ---- 源 ----
   const sb = $('setupSource'); sb.innerHTML = '';
-  sb.append(rowFor('源', S.source,
-    () => openPicker('source', -1, 'setup'),
-    () => setSource(S.cwd),
-    () => setSource(null)));
+  sb.append(rowFor('源', S.source, -2));
+  const srcActs = document.createElement('div');
+  srcActs.style.cssText = 'display:flex;gap:6px;margin-top:8px';
+  srcActs.append(
+    mk(mode === 'source' ? '✕ 取消互换' : '⇄ 和某个目标槽位互换',
+       () => { S.swapMode = mode === 'source' ? null : 'source'; S.swapFirst = -1; renderSetup(); },
+       'ghost'),
+  );
+  srcActs.firstChild.style.flex = '1';
+  sb.append(srcActs);
   if (canDeleteSource()) {
-    const db = document.createElement('button');
-    db.className = 'btn';
+    const db = mk('🗑 删除这个空文件夹（已处理完）',
+      () => { $('setupSheet').classList.remove('on'); deleteSourceDir(); });
     db.style.cssText = 'margin-top:8px;width:100%;color:var(--bad);border-color:#6e2b28';
-    db.textContent = '🗑 删除这个空文件夹（已处理完）';
-    db.onclick = () => { $('setupSheet').classList.remove('on'); deleteSourceDir(); };
     sb.append(db);
   }
 
+  // ---- 12/20 个槽位 ----
   const tb = $('setupTargets'); tb.innerHTML = '';
-  for (let i=0;i<SLOT_N;i++) {
-    tb.append(rowFor(String(i+1), S.targets[i],
-      () => openPicker('slot', i, 'setup'),
-      () => setTarget(i, S.cwd),
-      () => { S.targets[i] = null; scheduleSave(); renderSetup(); renderSlots(); }));
-  }
+  for (let i = 0; i < SLOT_N; i++) tb.append(rowFor(String(i + 1), S.targets[i], i));
 
-  const db = $('setupDel'); db.innerHTML = '';
-  db.append(rowFor('🗑', S.del,
-    () => openPicker('del', -1, 'setup'),
-    () => setDel(S.cwd),
-    () => { S.del = null; scheduleSave(); renderSetup(); }));
+  // ---- 丢弃 ----
+  const db2 = $('setupDel'); db2.innerHTML = '';
+  db2.append(rowFor('🗑', S.del, -1));
+
+  // ---- 互换模式的说明与退出 ----
+  const hint = $('swapHint');
+  if (mode) {
+    hint.style.display = '';
+    hint.innerHTML = mode === 'slot'
+      ? '调整顺序：点一个槽位的「选它」，再点另一个槽位即交换（可以和空槽位换）。'
+      : '源与目标互换：点某个槽位的「换它」，那个目录就成为新的待分类目录，原源目录放进该槽位。';
+  } else {
+    hint.style.display = 'none';
+    hint.innerHTML = '';
+  }
 
   $('setupNote').innerHTML =
     `· 目标可以是<b>同一块盘上的任意目录</b>（跨目录正常）；与源不同盘的槽位会标 ⚠，那种情况会改用「复制+校验+删除」<br>`
   + `· 配置会<b>保存到 NAS 上本页旁边的 snap-config.json</b>，换设备/换浏览器/清缓存都能沿用<br>`
-  + `· 长按或右键槽位也能快速改；「⚙ 批量勾选子目录」可以一次挑多个<br>`
+  + `· 长按或右键槽位也能快速改；「☑ 批量勾选子目录」可以一次挑多个<br>`
   + `· 当前源在存储池 <b>${esc(srcPool || '—')}</b>`;
 }
+
+/* ---------------- 槽位顺序调整 / 源与目标互换 ---------------- */
+function doSwapSlots(a, b) {
+  if (a === b) { toast('同一个槽位，不用换', 'warn'); return; }
+  const tmp = S.targets[a];
+  S.targets[a] = S.targets[b];
+  S.targets[b] = tmp;
+  scheduleSave(); renderSetup(); renderSlots();
+  const na = S.targets[a] ? `「${S.targets[a].name}」` : '空';
+  const nb = S.targets[b] ? `「${S.targets[b].name}」` : '空';
+  toast(`槽位 ${a + 1} 与 ${b + 1} 已交换：${a + 1}→${na}，${b + 1}→${nb}`, 'ok', 3000);
+}
+
+function doSwapSourceWithSlot(i) {
+  const t = S.targets[i];
+  if (!t) { toast('这个槽位是空的，先把目录放进槽位再换', 'warn'); return; }
+  const old = S.source;
+  S.source = { path: t.path, name: t.name };
+  S.targets[i] = old ? { path: old.path, name: old.name } : null;
+  S.swapMode = null; S.swapFirst = -1;
+  scheduleSave(); renderSetup(); renderSlots(); renderHeader();
+  toast(old
+    ? `已互换：「${S.source.name}」成为待分类目录，原源目录「${old.name}」放进槽位 ${i + 1}`
+    : `已把「${S.source.name}」设为待分类目录（槽位 ${i + 1} 清空）`, 'ok', 4000);
+  openSource(S.source.path, true);
+}
+
 /** 目录归属冲突检查：同一个目录不能既是源又是目标，也不能占两个槽位 */
 const normPath = (p) => { const s = String(p || ''); return s.endsWith('/') ? s : s + '/'; };
 function conflictWith(path, { selfSlot = -1, selfSource = false, selfDel = false } = {}) {
@@ -1375,6 +1441,11 @@ $('discard').onclick = () => {
   classify(S.del, null);
 };
 $('setup').onclick = openSetup;
+$('swapBtn').onclick = () => {
+  S.swapMode = S.swapMode === 'slot' ? null : 'slot';
+  S.swapFirst = -1;
+  renderSetup();
+};
 $('gridOpen').onclick = openGrid;
 $('gridPrev').onclick = () => gridStep(-1);
 $('gridNext').onclick = () => gridStep(1);
@@ -1451,13 +1522,10 @@ document.addEventListener('keydown', (e) => {
   updateAutoplayUI();
   updateSortUI();
   renderSlots(); renderHeader();
-  setSync('on', '载入配置…');
   await loadConfig();
   renderSlots(); renderHeader();
   const start = (S.source && S.source.path) || DIR;
-  if (S.source && S.source.path) setSync('ok', '已同步');
   await openSource(start);
-  if (!S.dirty) setSync('ok', '已同步');
   refreshCounts();
 })();
 </script>
