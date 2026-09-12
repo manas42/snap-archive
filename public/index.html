@@ -1553,10 +1553,11 @@ $('fillBtn').onclick = () => {
   refreshCounts();
 };
 $('clearAll').onclick = () => {
-  if (!confirm('清空全部目录设置（源、12 个目标、丢弃）？\n只会清配置，不会动任何文件。')) return;
-  S.source = null; S.targets = new Array(SLOT_N).fill(null); S.del = null;
-  scheduleSave(); renderSetup(); renderSlots(); renderHeader();
-  toast('已清空设置', 'ok');
+  if (!confirm('清空全部设置？\n（源目录、目标槽位、丢弃目录、撤销记录都会清除；磁盘上的文件一个都不会动）')) return;
+  S.source = null; S.targets = new Array(SLOT_N).fill(null); S.del = null; S.undoStack = [];
+  S.cwd = null; S.raw = []; S.files = []; S.index = 0; S.entryCount = 0; S.otherNames = [];
+  scheduleSave(); renderSetup(); renderSlots(); renderHeader(); render();
+  toast('已清空全部设置（磁盘文件未改动）', 'ok');
 };
 $('reloadCfg').onclick = async () => { await loadConfig(); renderSetup(); renderSlots(); renderHeader(); if (S.source) openSource(S.source.path); };
 // 槽位区滚动时更新"下面还有"的渐隐提示
@@ -1583,8 +1584,24 @@ $('bHome').onclick = () => pickerLoad('/');
 $('bReload').onclick = () => pickerLoad(S.pick.dir);
 
 document.addEventListener('keydown', (e) => {
-  if ($('setupSheet').classList.contains('on') || $('browseSheet').classList.contains('on')) return;
-  if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  const on = (id) => $(id).classList.contains('on');
+  // 任何面板打开时：Esc 关闭，其余按键一律不响应。
+  // ★ 必须包含 gridSheet —— 之前漏了它，图集开着时按 1-9 会真的把文件移走。
+  if (on('gridSheet') || on('browseSheet') || on('setupSheet')) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (on('browseSheet')) {
+        $('browseSheet').classList.remove('on');
+        if (S.pick.from === 'setup') $('setupSheet').classList.add('on');
+      } else if (on('gridSheet')) {
+        $('gridSheet').classList.remove('on');
+      } else if (on('setupSheet')) {
+        $('setupSheet').classList.remove('on');
+      }
+    }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }   // metaKey 兼顾 macOS
   if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); if (S.index < S.files.length-1) { S.index++; renderStage(); renderFilm(); preload(); } }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); if (S.index > 0) { S.index--; renderStage(); renderFilm(); preload(); } }
   else if (/^[1-9]$/.test(e.key)) { const t = S.targets[Number(e.key)-1]; if (t) classify(t, document.querySelector(`.slot[data-slot="${Number(e.key)-1}"]`)); }
