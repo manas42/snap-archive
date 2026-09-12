@@ -2,6 +2,15 @@
 
 纯本地、无后端、键盘 + 鼠标驱动的图片人工分类器。把「待分类」文件夹拖进左边画布，把最多 20 个「分类目标」文件夹拖进右侧（外加 1 个固定 `Del` 槽位），然后一路快速归类。
 
+> **本仓库有两套实现，本 README 讲的是桌面版**
+>
+> | 实现 | 入口 | 形态 |
+> | --- | --- | --- |
+> | **桌面版**（下文） | `index.html` + `app.js` + `style.css` + `server.js` | 依赖浏览器 File System Access API，操作本机/映射盘上的文件夹 |
+> | **手机版** | `public/index.html`（单文件、零依赖） | 手机浏览器直接操作局域网 NAS 上的文件；页面与 NAS 的 WebDAV 同源，用 `PROPFIND/MOVE/COPY/DELETE` 干活，配置存在 NAS 上同目录的 `snap-config.json` |
+>
+> 手机版的**设计说明**见 [`design/DESIGN.md`](design/DESIGN.md)，**测试用例**见 [`tests/TEST-CASES.md`](tests/TEST-CASES.md)（怎么跑见 [`tests/README.md`](tests/README.md)），部署脚本为 [`tools/deploy-webdav.sh`](tools/deploy-webdav.sh)。
+
 ## 环境要求
 
 - **Chrome / Edge**（需要 File System Access API，用于真正移动文件）

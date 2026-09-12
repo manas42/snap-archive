@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Snap Archive · 零服务端版（路线 B）部署脚本
 #
-# 作用：把本地文件 PUT 到极空间 WebDAV 上的目标目录。改前端 = 跑一次这个脚本。
+# 作用：把本地文件 PUT 到 NAS WebDAV 上的目标目录。改前端 = 跑一次这个脚本。
 #
 # 用法：
 #   bash tools/deploy-webdav.sh public/index.html /pool-a/snap-test/index.html

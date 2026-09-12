@@ -390,7 +390,7 @@ const baseOf = (h) => { const t = String(h).replace(/\/$/,''); return dec(t.slic
 const parentOf = (h) => { const p = h.replace(/\/$/,'').split('/'); p.pop(); return p.join('/')+'/'; };
 const human = (n) => n>1048576 ? (n/1048576).toFixed(1)+'MB' : n>1024 ? Math.round(n/1024)+'KB' : n+'B';
 const joinEnc = (dir, name) => dir + enc(name);
-/** 挂载点 = WebDAV 路径第一段。极空间每个存储池是一个挂载点；实测跨挂载点 MOVE 会 405 */
+/** 挂载点 = WebDAV 路径第一段（这类 NAS 的每个存储池就是一个挂载点）；实测跨挂载点 MOVE 会 405 */
 const poolOf = (p) => dec(String(p||'/').replace(/^\//,'').split('/')[0] || '/');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() || '/');
