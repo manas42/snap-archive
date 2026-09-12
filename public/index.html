@@ -732,7 +732,10 @@ function render() {
 
 function renderHeader() {
   $('srcName').textContent = S.source ? S.source.name : '未选择待分类目录';
-  $('srcPath').textContent = S.cwd ? dec(S.cwd) : '点这里选择';
+  // 路径显示"当前正在看的目录"；若它不是待分类目录（例如正在浏览某个目标槽位），如实标注
+  if (!S.cwd) { $('srcPath').textContent = '点这里选择'; return; }
+  const notSource = S.source && normPath(S.source.path) !== normPath(S.cwd);
+  $('srcPath').textContent = dec(S.cwd) + (notSource ? '（仅浏览，非待分类目录）' : '');
 }
 
 function renderStage() {
@@ -767,7 +770,7 @@ function renderStage() {
       S.dirs.slice(0,12).forEach((d) => {
         const b = document.createElement('button');
         b.textContent = '📁 ' + d.name;
-        b.onclick = () => openSource(d.href);
+        b.onclick = () => goToDir(d.href);
         qd.append(b);
       });
     }
@@ -811,7 +814,7 @@ function renderFilm() {
   S.dirs.forEach((d) => {
     const b = document.createElement('button');
     b.className = 'th dir'; b.textContent = '📁 ' + d.name.slice(0,8);
-    b.onclick = () => openSource(d.href);
+    b.onclick = () => goToDir(d.href);
     box.append(b);
   });
   S.files.forEach((f, i) => {
@@ -978,9 +981,27 @@ function dropUndo(rec) {
   renderSlots();
 }
 
+/** 首页里直接进入某个目录 = 把它当作「待分类目录」。
+ *  以前这里只改浏览位置、不改源，于是出现"正在分类 A，左上角却写着未选择源"的错乱。
+ *  若该目录已经是某个目标槽位/丢弃目录（不能同时当源），则只浏览、不动源。 */
+function goToDir(dir) {
+  const p = normPath(dir);
+  if (!S.source || normPath(S.source.path) !== p) {
+    const d = conflictWith(p, { selfSource: true });
+    if (!d) {
+      S.source = { path: p, name: labelOf(p) };
+      scheduleSave();
+      renderHeader();
+    }
+  }
+  openSource(p, true);
+}
+
 /* ---------------- 删除空文件夹（桌面版的收尾动作） ---------------- */
+/** 目录里是否还有子文件夹 —— 有子文件夹就不是"空目录"，不该出现删除入口 */
 function canDeleteSource() {
-  return !!(S.source && S.source.path && S.cwd === S.source.path && S.files.length === 0 && S.raw.length === 0);
+  return !!(S.source && S.source.path && S.cwd === S.source.path
+    && S.files.length === 0 && S.raw.length === 0 && S.dirs.length === 0);
 }
 
 /** 搬运一个子目录（集合）。跨盘时 MOVE 会 405 —— 明确拒绝，不猜也不硬来 */
