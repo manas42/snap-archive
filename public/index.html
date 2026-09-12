@@ -15,6 +15,7 @@
     --fg:#e6edf3; --dim:#8b98a5; --dim-2:#63707e;
     --acc:#4c9aff; --acc-dim:#1f4f8f; --ok:#3fb950; --warn:#e3b341; --bad:#f85149;
     --r:14px; --r-sm:10px;
+    --slot-h:56px; --slot-gap:6px;          /* 槽位行高与间距：用于算"只露 3 行"的高度 */
     --shadow:0 8px 24px rgba(0,0,0,.45);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -105,12 +106,25 @@
   .th.dir{display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim);
     line-height:1.15;text-align:center;padding:2px;background:var(--panel-2)}
 
-  /* ---------- 底部槽位 ---------- */
+  /* ---------- 底部槽位（20 个 = 4 列 × 5 行；默认只露 3 行，可上下滑） ---------- */
   footer{flex:0 0 auto;border-top:1px solid var(--line-soft);background:rgba(11,15,20,.85);backdrop-filter:blur(12px);
     padding:8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left))}
-  .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .slots-outer{position:relative}
+  .slots-wrap{
+    max-height:calc(3 * var(--slot-h) + 2 * var(--slot-gap));   /* 只露 3 行 */
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;                                 /* 别把滚动传给整页 */
+    scrollbar-width:thin;
+  }
+  .slots-wrap::-webkit-scrollbar{width:4px}
+  .slots-wrap::-webkit-scrollbar-thumb{background:var(--panel-3);border-radius:4px}
+  /* 底部渐隐：提示"下面还有"（滑到底自动消失） */
+  .slots-fade{position:absolute;left:0;right:4px;bottom:0;height:20px;pointer-events:none;
+    background:linear-gradient(transparent,rgba(11,15,20,.92));opacity:0;transition:opacity .18s}
+  .slots-fade.on{opacity:1}
+  .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--slot-gap)}
   .slot{
-    position:relative;min-height:56px;border-radius:var(--r-sm);padding:6px 6px 5px;
+    position:relative;min-height:var(--slot-h);border-radius:var(--r-sm);padding:6px 6px 5px;
     background:linear-gradient(180deg,var(--panel-2),var(--panel));
     border:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;
     align-items:center;gap:2px;overflow:hidden;
@@ -207,7 +221,10 @@
 </main>
 
 <footer>
-  <div class="slots" id="slots"></div>
+  <div class="slots-outer">
+    <div class="slots-wrap" id="slotsWrap"><div class="slots" id="slots"></div></div>
+    <div class="slots-fade" id="slotsFade"></div>
+  </div>
   <div class="tools">
     <button class="btn" id="undo">↶ 撤销</button>
     <button class="btn" id="discard">🗑 丢弃</button>
@@ -287,7 +304,7 @@ const CFG_LS = 'snap.config.cache';
 const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
 const VID = new Set(['mp4','webm']);
-const SLOT_N = 12;
+const SLOT_N = 20;                              // 4 列 × 5 行；底部默认只露 3 行，可上下滑
 
 const dec = decodeURIComponent;
 const enc = encodeURIComponent;
@@ -559,24 +576,47 @@ function scrollFilmIntoView() {
   if (sel) sel.scrollIntoView({ inline:'center', block:'nearest', behavior:'smooth' });
 }
 
-function renderSlots() {
+/* 槽位按钮只创建一次，之后一律"原地更新"。
+   这点很重要：如果每次移动都 innerHTML='' 重建，清空的瞬间内容高度归零，
+   浏览器会把滚动位置钳回顶部 —— 用户滑到第 4、5 行点一下就被弹回去。 */
+let slotEls = [];
+function buildSlots() {
   const box = $('slots'); box.innerHTML = '';
-  const srcPool = S.cwd ? poolOf(S.cwd) : null;
-  S.targets.forEach((t, i) => {
+  slotEls = [];
+  for (let i = 0; i < SLOT_N; i++) {
     const b = document.createElement('button');
-    const xd = !!(t && srcPool && poolOf(t.path) !== srcPool);
-    b.className = 'slot' + (t ? '' : ' empty') + (xd ? ' xdisk' : '');
-    b.dataset.slot = i;
-    const cnt = t ? (S.counts[t.path] != null ? S.counts[t.path] + ' 个' : '…') : '';
-    b.innerHTML = `<span class="k">${i+1}</span>`
-      + `<span class="n">${t ? esc(t.name) : '未设置'}</span>`
-      + `<span class="c">${xd ? '⚠ 跨盘' : cnt}</span>`;
-    b.onclick = () => { t ? classify(t, b) : openPicker('slot', i); };
+    b.className = 'slot empty';
+    b.dataset.slot = String(i);
+    b.innerHTML = `<span class="k">${i+1}</span><span class="n"></span><span class="c"></span>`;
+    b.onclick = () => { const t = S.targets[i]; t ? classify(t, b) : openPicker('slot', i); };
     b.oncontextmenu = (e) => { e.preventDefault(); openPicker('slot', i); };
     box.append(b);
+    slotEls.push(b);
+  }
+  updateSlotsFade();
+}
+
+function renderSlots() {
+  const srcPool = S.cwd ? poolOf(S.cwd) : null;
+  S.targets.forEach((t, i) => {
+    const b = slotEls[i];
+    if (!b) return;
+    const xd = !!(t && srcPool && poolOf(t.path) !== srcPool);
+    b.className = 'slot' + (t ? '' : ' empty') + (xd ? ' xdisk' : '');
+    b.querySelector('.n').textContent = t ? t.name : '未设置';
+    b.querySelector('.c').textContent = xd ? '⚠ 跨盘'
+      : (t ? (S.counts[t.path] != null ? S.counts[t.path] + ' 个' : '…') : '');
   });
   $('undo').disabled = !S.last;
   $('discard').disabled = false;
+  updateSlotsFade();
+}
+
+/** 还有内容没露出来时，底部显示一层渐隐提示 */
+function updateSlotsFade() {
+  const w = $('slotsWrap'), f = $('slotsFade');
+  if (!w || !f) return;
+  f.classList.toggle('on', (w.scrollHeight - w.clientHeight - w.scrollTop) > 4);
 }
 
 /* ---------------- 分类 ---------------- */
@@ -590,13 +630,18 @@ async function classify(target, slotEl) {
     const res = await place(f.href, f.name, f.size, destDir);
     S.last = { backDir: S.cwd, name: res.finalName, from: res.destHref, mode: res.mode };
     if (S.counts[target.path] != null) S.counts[target.path] += 1;
-    if (slotEl) { slotEl.classList.add('flash'); setTimeout(()=>slotEl.classList.remove('flash'), 600); }
     if (navigator.vibrate) navigator.vibrate(12);
     const renamed = res.finalName !== f.name;
     toast(`已移到「${target.name}」${renamed ? '，改名为 ' + res.finalName : ''}${res.mode==='copy' ? '（跨盘复制）' : ''}`, 'ok', 1800);
     S.files.splice(S.index, 1);
     if (S.index >= S.files.length) S.index = Math.max(0, S.files.length-1);
     render(); preload();
+    // 闪光必须放在 render 之后：renderSlots 会重设 className，先加会被冲掉
+    if (slotEl) {
+      slotEl.classList.add('flash');
+      setTimeout(() => slotEl.classList.remove('flash'), 600);
+    }
+    updateSlotsFade();      // 计数文字变化可能影响是否需要滚动提示
   } catch (e) {
     toast(e.message, 'err', 5000);
   } finally { S.busy = false; }
@@ -888,6 +933,9 @@ $('clearAll').onclick = () => {
   toast('已清空设置', 'ok');
 };
 $('reloadCfg').onclick = async () => { await loadConfig(); renderSetup(); renderSlots(); renderHeader(); if (S.source) openSource(S.source.path); };
+// 槽位区滚动时更新"下面还有"的渐隐提示
+$('slotsWrap').addEventListener('scroll', updateSlotsFade, { passive: true });
+window.addEventListener('resize', updateSlotsFade);
 document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => {
     $(b.dataset.close).classList.remove('on');
@@ -911,6 +959,7 @@ document.addEventListener('keydown', (e) => {
 (async function boot() {
   // 先用浏览器缓存瞬间渲染，再以 NAS 上的配置为准
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
+  buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
   renderSlots(); renderHeader();
   setSync('on', '载入配置…');
   await loadConfig();
