@@ -389,6 +389,7 @@ const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() ||
 const S = {
   cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true,
   sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null, swapMode: null, swapFirst: -1,
+  entryCount: 0, otherNames: [],
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
   undoStack: [], busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
@@ -576,6 +577,11 @@ async function openSource(dir, force) {
     S.cwd = dir.endsWith('/') ? dir : dir + '/';
     S.dirs = items.filter((e) => e.dir);
     S.raw = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
+    // 目录里"所有条目"的数量（含子目录与 txt/DS_Store 之类非媒体文件）——
+    // 判断能否删除只认这个数：非空就绝不删，避免把 txt 之类的文件一起处理掉
+    S.entryCount = items.length;
+    S.otherNames = items.filter((e) => e.dir || !(IMG.has(extOf(e.name)) || VID.has(extOf(e.name))))
+                        .map((e) => e.name);
     showList(true);                     // 换目录后从第 1 个开始（内部会按当前排序规则排好）
   } catch (e) {
     toast(e.message, 'err', 5000);
@@ -748,10 +754,14 @@ function renderStage() {
     } else if (S.raw.length) {
       hint.innerHTML = `<span class="big">🔍</span>当前筛选（仅${fname}）下没有文件<br>`
         + `这个目录另有 <b>${S.raw.length}</b> 个其它媒体<br>点右上角的媒体类型按钮可切换`;
+    } else if (S.entryCount > 0) {
+      // 没有图片视频，但目录并不空（有子目录或 txt/隐藏文件之类）—— 说清为什么不能删
+      const names = S.otherNames.slice(0, 3).map(esc).join('、') + (S.otherNames.length > 3 ? '…' : '');
+      hint.innerHTML = `<span class="big">📄</span>这个目录里没有图片或视频<br>`
+        + `还有 ${S.entryCount} 个其它条目（${esc(names)}）<br>`
+        + (S.dirs.length ? '点下面的 📁 进入子目录' : '清空后才可以删除这个目录');
     } else {
-      // 子目录入口统一放在下面的缩略图条（📁），这里不再重复列一排
-      hint.innerHTML = `<span class="big">🖼️</span>这个目录里没有图片或视频<br>`
-        + (S.dirs.length ? '点下面的 📁 进入子目录' : '用「⚙ 设置」换一个目录');
+      hint.innerHTML = `<span class="big">🖼️</span>这个目录是空的<br>可用「⚙ 设置」换一个，或直接删掉它`;
     }
     renderBadge(null);
     if (canDeleteSource()) {
@@ -891,6 +901,8 @@ async function classify(target, slotEl) {
     //   列表里就出现"已经移走的图片"，再去点它必然 404
     const k = S.raw.findIndex((e) => e.href === f.href);
     if (k >= 0) S.raw.splice(k, 1);
+    // 目录里的总条目数也要减 1：否则处理完最后一张照片后，删除入口永远不出现
+    S.entryCount = Math.max(0, S.entryCount - 1);
     if (S.index >= S.files.length) S.index = Math.max(0, S.files.length-1);
     render(); preload();
     // 闪光必须放在 render 之后：renderSlots 会重设 className，先加会被冲掉
@@ -986,29 +998,10 @@ function goToDir(dir) {
 }
 
 /* ---------------- 删除空文件夹（桌面版的收尾动作） ---------------- */
-/** 目录里是否还有子文件夹 —— 有子文件夹就不是"空目录"，不该出现删除入口 */
+/** 只有整个目录**一个条目都没有**时才允许删（子目录、txt、隐藏文件都算非空）。
+ *  宁可让人去文件管理器里手动清干净，也不要在应用里"顺手"处理掉非图片视频的东西。 */
 function canDeleteSource() {
-  return !!(S.source && S.source.path && S.cwd === S.source.path
-    && S.files.length === 0 && S.raw.length === 0 && S.dirs.length === 0);
-}
-
-/** 搬运一个子目录（集合）。跨盘时 MOVE 会 405 —— 明确拒绝，不猜也不硬来 */
-async function moveCollection(srcHref, name, destDir) {
-  const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const suffix = dot > 0 ? name.slice(dot) : '';
-  for (let i = 0; i < 50; i++) {
-    const finalName = i === 0 ? name : `${stem} (${i})${suffix}`;
-    const dest = joinEnc(destDir, finalName);
-    const r = await fetch(srcHref, { method:'MOVE', credentials:'same-origin',
-      headers:{ 'Destination': ORIGIN + dest, 'Overwrite':'F' } });
-    if (r.status >= 200 && r.status < 300) return finalName;
-    if (r.status === 412) continue;
-    if (r.status === 405 || r.status === 502)
-      throw new Error(`子目录「${name}」在另一块磁盘上，无法自动搬运，请手动处理后再删`);
-    throw new Error(`搬运子目录失败 HTTP ${r.status}`);
-  }
-  throw new Error('同名目录过多');
+  return !!(S.source && S.source.path && S.cwd === S.source.path && S.entryCount === 0);
 }
 
 async function deleteSourceDir() {
@@ -1016,30 +1009,20 @@ async function deleteSourceDir() {
   const dir = S.source && S.source.path;
   if (!dir) { toast('还没有设置待分类目录', 'warn'); return; }
   S.busy = true;
-  let done = false, movedOut = 0, dropped = 0, goneName = '', delName = '丢弃';
+  let done = false, dropped = 0, goneName = '';
   try {
+    // 以磁盘上的实时状态为准：只要还有**任何**条目（子目录、txt、隐藏文件…）就拒绝删除。
+    // 不自动搬运、不"顺手"处理非图片视频的东西 —— 宁可让人去文件管理器清干净。
     const list = await propfind(ORIGIN + dir, 1);
     if (!list) throw new Error('目录已经不存在了');
     const entries = list.filter((e) => normPath(e.href) !== normPath(dir));
     if (entries.length) {
-      const names = entries.slice(0, 4).map((e) => e.name).join('、');
-      const more = entries.length > 4 ? ` 等共 ${entries.length} 项` : '';
-      if (!S.del) throw new Error(`目录里还有 ${entries.length} 项（${names}${more}），但没设置「丢弃」目录，无法自动搬走`);
-      if (!confirm(`待分类目录里还有 ${entries.length} 项没处理：\n${names}${more}\n\n`
-        + `把它们全部搬进「${S.del.name}」，然后删除这个目录？\n（这一步不可撤销）`)) return;
-      const destDir = normPath(S.del.path);
-      for (const e of entries) {
-        if (e.dir) await moveCollection(e.href, e.name, destDir);
-        else await place(e.href, e.name, e.size, destDir);
-        movedOut++;
-      }
-    } else if (!confirm(`删除空目录「${S.source.name}」？\n（不可撤销；磁盘上的这个文件夹会被删掉）`)) {
-      return;
+      const names = entries.slice(0, 5).map((e) => e.name).join('、');
+      const more = entries.length > 5 ? ` 等共 ${entries.length} 项` : '';
+      throw new Error(`目录不是空的，不能删：还有 ${entries.length} 项（${names}${more}）。`
+        + `本应用只处理图片和视频，请先在文件管理器里处理掉它们，清空后再删。`);
     }
-    // 删之前再确认一次真的空了（避免 Delete 一个非空目录被拒后状态混乱）
-    const again = await propfind(ORIGIN + dir, 1);
-    const left = (again || []).filter((e) => normPath(e.href) !== normPath(dir));
-    if (left.length) throw new Error(`目录里还有 ${left.length} 项没清空，已中止删除`);
+    if (!confirm(`删除空目录「${S.source.name}」？\n（不可撤销；磁盘上的这个文件夹会被删掉）`)) return;
     const d = await fetch(ORIGIN + dir, { method:'DELETE', credentials:'same-origin' });
     if (d.status !== 204 && d.status !== 200)
       throw new Error('删除目录失败 HTTP ' + d.status + '（只有空目录能删）');
@@ -1049,7 +1032,6 @@ async function deleteSourceDir() {
     S.undoStack = S.undoStack.filter((r) => normPath(r.backDir) !== normPath(dir));
     dropped = before - S.undoStack.length;
     goneName = S.source.name;
-    delName = S.del ? S.del.name : '丢弃';
     done = true;
   } catch (e) {
     toast(e.message, 'err', 6000);
@@ -1059,16 +1041,14 @@ async function deleteSourceDir() {
   if (!done) return;
 
   S.source = null;
-  S.cwd = null; S.raw = []; S.files = []; S.index = 0;
+  S.cwd = null; S.raw = []; S.files = []; S.index = 0; S.entryCount = 0; S.otherNames = [];
   scheduleSave();
   renderHeader(); renderSlots(); render();
   const parent = parentOf(dir);
   await openSource(parent, true);
   // 删完停在父目录：下次选新目录就从这里开始，不用再从根目录一层层找
   S.lastPickDir = S.cwd || parent;
-  toast(`已删除「${goneName}」`
-    + (movedOut ? `，${movedOut} 项已搬进「${delName}」` : '')
-    + (dropped ? `；${dropped} 步撤销已失效并移除` : ''), 'ok', 4500);
+  toast(`已删除「${goneName}」` + (dropped ? `；${dropped} 步撤销已失效并移除` : ''), 'ok', 4500);
 }
 
 /* ---------------- 设置面板 ---------------- */
