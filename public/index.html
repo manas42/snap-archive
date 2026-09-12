@@ -51,6 +51,21 @@
     background:rgba(11,15,20,.72); backdrop-filter:blur(12px);
     position:relative; z-index:5;
   }
+  .chip{flex:0 0 auto;min-height:44px;padding:0 10px;border-radius:var(--r-sm);
+    background:linear-gradient(180deg,var(--panel-3),var(--panel-2));border:1px solid var(--line);
+    color:var(--fg);font-size:12px;font-weight:700;white-space:nowrap;transition:transform .08s ease}
+  .chip:active{transform:scale(.94)}
+  .chip[data-f="image"],.chip[data-f="video"]{border-color:var(--acc);color:var(--acc)}
+  .seg{display:flex;gap:6px;margin-bottom:12px}
+  .seg .btn{flex:1;min-height:42px;font-size:12.5px}
+  .seg .btn.on{background:linear-gradient(180deg,#2f6fd0,#255bb0);border-color:#3b7de0;color:#fff}
+  /* 视频中央的大播放键：移动端 preload=metadata 常常只显示黑框，需要明确的点击目标 */
+  .playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+    width:76px;height:76px;border-radius:50%;font-size:28px;color:#fff;line-height:1;
+    background:rgba(10,14,20,.6);border:2px solid rgba(255,255,255,.55);
+    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);
+    transition:opacity .18s}
+  .playbtn.hidden{opacity:0;pointer-events:none}
   .brand{display:flex;align-items:center;gap:7px;flex:0 0 auto}
   .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
   .brand b{font-size:14px;letter-spacing:.4px}
@@ -201,12 +216,12 @@
 <body>
 
 <header>
-  <div class="brand"><span class="dot"></span><b>Snap</b></div>
   <button class="srcbtn" id="srcBtn">
     <span class="ico">📂</span>
     <span class="t"><span class="n" id="srcName">待分类目录</span><span class="p" id="srcPath">点这里选择</span></span>
     <span class="ico" style="opacity:.5">▾</span>
   </button>
+  <button class="chip" id="filterChip" data-f="all" title="切换媒体类型（图片 / 视频 / 两者）">图+视</button>
   <div class="sync" id="sync">—</div>
 </header>
 
@@ -237,6 +252,13 @@
   <div class="card">
     <h2><span>⚙ 目录设置</span><span class="sp"></span><button class="btn ghost icon" data-close="setupSheet">✕</button></h2>
     <div class="body">
+      <div class="grp">媒体类型</div>
+      <div class="seg">
+        <button class="btn" id="filter_all">图片 + 视频</button>
+        <button class="btn" id="filter_image">仅图片</button>
+        <button class="btn" id="filter_video">仅视频</button>
+      </div>
+
       <div class="grp">待分类目录（源）</div>
       <div id="setupSource"></div>
 
@@ -299,8 +321,9 @@
 
 const ORIGIN = location.origin;
 const DIR = location.pathname.replace(/[^/]*$/, '');       // 本页所在目录（编码）
-const CFG_URL = DIR + 'snap-config.json';
+const CFG_URL = ORIGIN + DIR + 'snap-config.json';   // 绝对 URL：页面若从带凭据的 URL 打开，相对 URL 会让 fetch 直接抛错
 const CFG_LS = 'snap.config.cache';
+const FILTER_LS = 'snap.filter';
 const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
 const VID = new Set(['mp4','webm']);
@@ -319,7 +342,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c)=>({'&':'&amp;','<':'&lt;','>
 const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() || '/');
 
 const S = {
-  cwd: null, files: [], dirs: [], index: 0,
+  cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all',
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
   last: null, busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
@@ -409,7 +432,7 @@ async function place(srcHref, srcName, srcSize, destDir) {
 
 /* ---------------- 配置：存在 NAS 上 ---------------- */
 function snapshot() {
-  return { version:1, source:S.source, targets:S.targets, del:S.del, updated:new Date().toISOString() };
+  return { version:1, source:S.source, targets:S.targets, del:S.del, filter:S.filter, updated:new Date().toISOString() };
 }
 function applyConfig(c) {
   if (!c || typeof c !== 'object') return false;
@@ -420,6 +443,7 @@ function applyConfig(c) {
       .concat(new Array(SLOT_N).fill(null)).slice(0,SLOT_N);
   }
   if (c.del && c.del.path) S.del = { path:c.del.path, name:c.del.name || labelOf(c.del.path) };
+  if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
   return true;
 }
 async function loadConfig() {
@@ -475,16 +499,48 @@ async function openSource(dir) {
     const items = list.filter((e) => e.href !== dir && e.href !== dir.replace(/\/$/,''));
     S.cwd = dir.endsWith('/') ? dir : dir + '/';
     S.dirs = items.filter((e) => e.dir);
-    S.files = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
-    S.files.sort((a,b) => b.mtime - a.mtime);
-    S.index = 0;
-    render();
+    S.raw = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
+    S.raw.sort((a,b) => b.mtime - a.mtime);
+    applyFilter(false);
     if (!S.dirty) setSync('', '已同步');
-    preload();
   } catch (e) {
     toast(e.message, 'err', 5000);
     setSync('err', '读取失败');
   } finally { S.busy = false; }
+}
+
+/* 媒体类型筛选：all=图片+视频 / image=仅图片 / video=仅视频
+   S.raw 是目录里的全部媒体，S.files 是筛选后的结果 */
+function applyFilter(keepCurrent = true) {
+  const cur = keepCurrent ? S.files[S.index] : null;
+  const f = S.filter;
+  S.files = S.raw.filter((e) => f === 'all' ? true
+    : f === 'image' ? IMG.has(extOf(e.name)) : VID.has(extOf(e.name)));
+  let i = cur ? S.files.findIndex((e) => e.href === cur.href) : -1;
+  if (i < 0) i = Math.min(S.index, Math.max(0, S.files.length - 1));
+  S.index = i;
+  updateFilterUI();
+  render();
+  preload();
+}
+
+function updateFilterUI() {
+  const label = { all:'图+视', image:'仅图片', video:'仅视频' }[S.filter] || '图+视';
+  const chip = $('filterChip');
+  if (chip) { chip.textContent = label; chip.dataset.f = S.filter; }
+  ['all','image','video'].forEach((k) => {
+    const b = $('filter_' + k);
+    if (b) b.classList.toggle('on', S.filter === k);
+  });
+}
+
+function setFilter(f) {
+  if (!['all','image','video'].includes(f)) f = 'all';
+  S.filter = f;
+  try { localStorage.setItem(FILTER_LS, f); } catch(e){}
+  applyFilter(true);
+  scheduleSave();                       // 顺手存进 NAS 上的配置
+  toast('媒体类型：' + ({all:'图片 + 视频', image:'仅图片', video:'仅视频'}[f]), 'ok', 1400);
 }
 
 function preload() {
@@ -506,17 +562,23 @@ function renderHeader() {
 
 function renderStage() {
   const st = $('stage');
-  // 清掉上一张图，保留 spinner / hint / badge / quickDirs
-  st.querySelectorAll('img,video').forEach((n)=>n.remove());
+  // 清掉上一张图/视频与播放键，保留 spinner / hint / badge / quickDirs
+  st.querySelectorAll('img,video,.playbtn').forEach((n)=>n.remove());
   const hint = $('hint');
   const f = S.files[S.index];
   const qd = $('quickDirs');
   qd.innerHTML = '';
   if (!f) {
     hint.style.display = '';
-    hint.innerHTML = S.cwd
-      ? `<span class="big">🖼️</span>这个目录里没有图片<br>用下面的「⚙ 设置」换目录，或进子目录`
-      : `<span class="big">🖼️</span>先选一个「待分类」目录<br>然后在下面配置目标目录`;
+    const fname = { all:'图片或视频', image:'图片', video:'视频' }[S.filter] || '媒体';
+    if (!S.cwd) {
+      hint.innerHTML = `<span class="big">🖼️</span>先选一个「待分类」目录<br>然后在下面配置目标目录`;
+    } else if (S.raw.length) {
+      hint.innerHTML = `<span class="big">🔍</span>当前筛选（仅${fname}）下没有文件<br>`
+        + `这个目录另有 <b>${S.raw.length}</b> 个其它媒体<br>点右上角的媒体类型按钮可切换`;
+    } else {
+      hint.innerHTML = `<span class="big">🖼️</span>这个目录里没有图片或视频<br>用「⚙ 设置」换目录，或点上面的子目录`;
+    }
     renderBadge(null);
     if (S.dirs.length) {
       S.dirs.slice(0,12).forEach((d) => {
@@ -531,12 +593,22 @@ function renderStage() {
   hint.style.display = 'none';
   const isV = VID.has(extOf(f.name));
   const el = document.createElement(isV ? 'video' : 'img');
-  el.src = f.href;
-  if (isV) { el.controls = true; el.playsInline = true; el.preload='metadata'; }
+  el.src = isV ? f.href + '#t=0.1' : f.href;      // #t=0.1 让移动端也能画出首帧
+  if (isV) { el.controls = true; el.playsInline = true; el.preload = 'metadata'; }
   const spin = $('spin'); spin.classList.add('on');
   const done = () => spin.classList.remove('on');
   el.addEventListener('load', done); el.addEventListener('loadeddata', done); el.addEventListener('error', done);
   st.insertBefore(el, $('badge'));
+  if (isV) {
+    const pb = document.createElement('button');
+    pb.className = 'playbtn'; pb.type = 'button'; pb.textContent = '▶';
+    pb.setAttribute('aria-label', '播放');
+    pb.onclick = (e) => { e.stopPropagation(); el.paused ? el.play() : el.pause(); };
+    el.addEventListener('play', () => pb.classList.add('hidden'));
+    el.addEventListener('pause', () => pb.classList.remove('hidden'));
+    el.addEventListener('ended', () => pb.classList.remove('hidden'));
+    st.insertBefore(pb, $('badge'));
+  }
   renderBadge(f);
 }
 
@@ -563,7 +635,7 @@ function renderFilm() {
     b.className = 'th' + (i===S.index ? ' sel' : '');
     const isV = VID.has(extOf(f.name));
     b.innerHTML = isV
-      ? `<video src="${f.href}" preload="metadata" muted playsinline></video><span class="v">▶</span>`
+      ? `<video src="${f.href}#t=0.1" preload="metadata" muted playsinline></video><span class="v">▶</span>`
       : `<img loading="lazy" src="${f.href}" alt="">`;
     b.onclick = () => { S.index = i; renderStage(); renderFilm(); preload(); scrollFilmIntoView(i); };
     box.append(b);
@@ -649,10 +721,13 @@ async function classify(target, slotEl) {
 
 async function undo() {
   if (S.busy || !S.last) return;
-  S.busy = true; toast('撤销中…', '', 1200);
+  const rec = S.last;                       // 先抓住，避免下面被清掉
+  S.busy = true;
+  toast('撤销中…', '', 1200);
+  let done = false;
   try {
-    const back = joinEnc(S.last.backDir, S.last.name);
-    const tryIt = async (method) => (await fetch(S.last.from, { method, credentials:'same-origin',
+    const back = joinEnc(rec.backDir, rec.name);
+    const tryIt = async (method) => (await fetch(rec.from, { method, credentials:'same-origin',
       headers:{ 'Destination': ORIGIN + back, 'Overwrite':'F' } })).status;
     let st = await tryIt('MOVE');
     if (st === 412) throw new Error('原位置已有同名文件，撤销中止（没有改动任何文件）');
@@ -661,15 +736,22 @@ async function undo() {
       if (st >= 200 && st < 300) {
         const info = await statOf(ORIGIN + back);
         if (!info) throw new Error('回拷校验失败 —— 原副本仍在目标位置，未删除');
-        const d = await fetch(S.last.from, { method:'DELETE', credentials:'same-origin' });
+        const d = await fetch(rec.from, { method:'DELETE', credentials:'same-origin' });
         if (d.status !== 204 && d.status !== 200) throw new Error('回拷成功但清理失败，请手动检查');
       }
     }
     if (!(st >= 200 && st < 300)) throw new Error('撤销失败 HTTP ' + st);
-    S.last = null; toast('已撤销', 'ok', 1600);
-    await openSource(S.cwd);
-  } catch (e) { toast(e.message, 'err', 5000); }
-  finally { S.busy = false; }
+    S.last = null;
+    done = true;
+  } catch (e) {
+    toast(e.message, 'err', 5000);
+  } finally {
+    S.busy = false;                         // ★ 必须先释放，否则下面的 openSource 会被 busy 挡掉
+  }
+  if (done) {
+    toast('已撤销', 'ok', 1600);
+    await openSource(S.cwd);                // 此时 busy=false，才会真的重新拉取目录
+  }
 }
 
 /* ---------------- 设置面板 ---------------- */
@@ -904,6 +986,8 @@ function applyBatch() {
 
 /* ---------------- 事件 ---------------- */
 $('srcBtn').onclick = () => openPicker('source', -1);
+$('filterChip').onclick = () => setFilter(S.filter === 'all' ? 'image' : S.filter === 'image' ? 'video' : 'all');
+['all','image','video'].forEach((k) => { const b = $('filter_' + k); if (b) b.onclick = () => setFilter(k); });
 $('undo').onclick = undo;
 $('discard').onclick = () => {
   if (!S.del) { toast('还没设置「丢弃」目录，去 ⚙ 设置里选一个', 'warn'); openSetup(); return; }
@@ -957,9 +1041,11 @@ document.addEventListener('keydown', (e) => {
 
 /* ---------------- 启动 ---------------- */
 (async function boot() {
-  // 先用浏览器缓存瞬间渲染，再以 NAS 上的配置为准
+  // 先用浏览器缓存（配置 + 媒体类型）瞬间渲染，再以 NAS 上的配置为准
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
+  try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
   buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
+  updateFilterUI();
   renderSlots(); renderHeader();
   setSync('on', '载入配置…');
   await loadConfig();
