@@ -389,7 +389,7 @@ const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() ||
 
 const S = {
   cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true,
-  sortMode: 'mtime-desc', gridPage: 0,
+  sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null,
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
   undoStack: [], busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
@@ -564,8 +564,11 @@ async function saveConfig() {
 }
 
 /* ---------------- 浏览源目录 ---------------- */
-async function openSource(dir) {
-  if (S.busy) return;
+/** force=true 时无视 busy 守卫。
+ *  必须提供这个口子：删除目录、撤销这类操作是"自己在 busy 作用域里"需要刷新目录的，
+ *  否则 openSource 会被自己的 busy 挡掉，出现"操作成功了但界面没动"。 */
+async function openSource(dir, force) {
+  if (S.busy && !force) return;
   S.busy = true;
   setSync(S.dirty ? 'on' : '', S.dirty ? '待保存…' : '读取中…');
   try {
@@ -954,8 +957,17 @@ async function undo() {
   }
   if (done) {
     dropUndo(rec);
-    toast(S.undoStack.length ? `已撤销（还可撤销 ${S.undoStack.length} 步）` : '已撤销', 'ok', 1600);
-    await openSource(S.cwd);
+    await openSource(S.cwd, true);
+    // 桌面版的行为：撤销后跳回被撤销的那张（而不是停在列表第 1 张），
+    // 这样能立刻看到它、必要时重新分类
+    const i = S.files.findIndex((f) => f.name === rec.name);
+    if (i >= 0) {
+      S.index = i;
+      renderStage(); renderFilm(); preload();
+      scrollFilmIntoView();
+    }
+    toast(`已撤销：${rec.name} → 第 ${S.index + 1} / ${S.files.length} 张`
+      + (S.undoStack.length ? `（还可撤 ${S.undoStack.length} 步）` : ''), 'ok', 2400);
   }
 }
 
@@ -995,11 +1007,11 @@ async function deleteSourceDir() {
   const dir = S.source && S.source.path;
   if (!dir) { toast('还没有设置待分类目录', 'warn'); return; }
   S.busy = true;
+  let done = false, movedOut = 0, dropped = 0, goneName = '', delName = '丢弃';
   try {
     const list = await propfind(ORIGIN + dir, 1);
     if (!list) throw new Error('目录已经不存在了');
     const entries = list.filter((e) => normPath(e.href) !== normPath(dir));
-    let movedOut = 0;
     if (entries.length) {
       const names = entries.slice(0, 4).map((e) => e.name).join('、');
       const more = entries.length > 4 ? ` 等共 ${entries.length} 项` : '';
@@ -1026,19 +1038,28 @@ async function deleteSourceDir() {
     // 撤销栈里"退回这个目录"的步骤已无法执行，清掉并如实告知
     const before = S.undoStack.length;
     S.undoStack = S.undoStack.filter((r) => normPath(r.backDir) !== normPath(dir));
-    const dropped = before - S.undoStack.length;
-    const goneName = S.source.name, delName = S.del ? S.del.name : '丢弃';
-    S.source = null;
-    S.cwd = null; S.raw = []; S.files = []; S.index = 0;
-    scheduleSave();
-    renderHeader(); renderSlots(); render();
-    await openSource(parentOf(dir));
-    toast(`已删除「${goneName}」`
-      + (movedOut ? `，${movedOut} 项已搬进「${delName}」` : '')
-      + (dropped ? `；${dropped} 步撤销已失效并移除` : ''), 'ok', 4500);
+    dropped = before - S.undoStack.length;
+    goneName = S.source.name;
+    delName = S.del ? S.del.name : '丢弃';
+    done = true;
   } catch (e) {
     toast(e.message, 'err', 6000);
-  } finally { S.busy = false; }
+  } finally {
+    S.busy = false;             // ★ 先释放，否则下面的 openSource 会被 busy 挡掉（同 undo 那个坑）
+  }
+  if (!done) return;
+
+  S.source = null;
+  S.cwd = null; S.raw = []; S.files = []; S.index = 0;
+  scheduleSave();
+  renderHeader(); renderSlots(); render();
+  const parent = parentOf(dir);
+  await openSource(parent, true);
+  // 删完停在父目录：下次选新目录就从这里开始，不用再从根目录一层层找
+  S.lastPickDir = S.cwd || parent;
+  toast(`已删除「${goneName}」`
+    + (movedOut ? `，${movedOut} 项已搬进「${delName}」` : '')
+    + (dropped ? `；${dropped} 步撤销已失效并移除` : ''), 'ok', 4500);
 }
 
 /* ---------------- 设置面板 ---------------- */
@@ -1161,13 +1182,20 @@ async function refreshCounts() {
 
 /* ---------------- 目录浏览器（选源 / 选槽位 / 批量勾选） ---------------- */
 function openPicker(mode, slot, from) {
-  S.pick = { mode, slot, dir:'/', chosen:new Set(), from: from || 'main' };
+  // 起始目录：优先"上次浏览到哪"，其次源/目标的父目录，最后当前正在看的目录。
+  // 都不为空才退回根目录 —— 之前源为空时直接回 '/'，删完文件夹再选新目录就得从根找。
+  let start;
+  if (mode === 'source')      start = S.source ? parentOf(S.source.path) : (S.cwd || '/');
+  else if (mode === 'del')    start = S.del ? parentOf(S.del.path) : (S.cwd || '/');
+  else                        start = (S.targets[slot] ? parentOf(S.targets[slot].path) : (S.cwd || '/'));
+  const fallback = start;
+  if (S.lastPickDir) start = S.lastPickDir;
+
+  S.pick = { mode, slot, dir: start, chosen: new Set(), from: from || 'main' };
   $('setupSheet').classList.remove('on');
   $('browseSheet').classList.add('on');
   renderPickerFoot();
-  pickerLoad(mode === 'source' ? (S.source ? parentOf(S.source.path) : '/')
-            : mode === 'del' ? (S.del ? parentOf(S.del.path) : '/')
-            : (S.targets[slot] ? parentOf(S.targets[slot].path) : (S.cwd || '/')));
+  pickerLoad(start, fallback);
 }
 
 function renderPickerFoot() {
@@ -1203,7 +1231,7 @@ function renderPickerFoot() {
 let pickerDirs = [];
 const pickerCurrentDirs = () => pickerDirs;
 
-async function pickerLoad(dir) {
+async function pickerLoad(dir, fallback) {
   S.pick.dir = dir.endsWith('/') ? dir : dir + '/';
   const here = poolOf(S.pick.dir), srcPool = S.cwd ? poolOf(S.cwd) : null;
   const same = !srcPool || here === srcPool;
@@ -1215,7 +1243,16 @@ async function pickerLoad(dir) {
   const box = $('bList');
   box.innerHTML = '<div class="note">载入中…</div>';
   try {
-    pickerDirs = (await listDirs(S.pick.dir)) || [];
+    const list = await listDirs(S.pick.dir);
+    if (list === null) {                        // 404：这个目录已经不在了（例如上次浏览的目录刚被删掉）
+      if (fallback && fallback !== S.pick.dir) return pickerLoad(fallback);
+      pickerDirs = [];
+      box.innerHTML = '<div class="note">这个目录已经不存在了，点上面的 ↑ 换个地方</div>';
+      renderPickerFoot();
+      return;
+    }
+    pickerDirs = list;
+    S.lastPickDir = S.pick.dir;                 // 记住浏览位置，下次打开直接落在这里
     renderPickerList();
   } catch (e) {
     box.innerHTML = `<div class="note" style="color:#f85149">${esc(e.message)}</div>`;
