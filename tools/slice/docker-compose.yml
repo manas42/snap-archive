@@ -1,0 +1,36 @@
+# V0 纵切 · 最小可跑的验证（Docker Compose，极空间可直接用）
+#
+# 目的：花半天把「手机看 NAS 缩略图」这条最小闭环跑通，一次性验证下面 6 个假设：
+#   ① 极空间 Docker 能跑我们自己的服务
+#   ② 能把照片共享「文件夹映射」进容器（且知道真实的 /volume 路径）
+#   ③ sharp 在容器里能正常出图（含 EXIF 旋转）
+#   ④ 自定义端口 8787 可用、容器能访问外网装依赖
+#   ⑤ 手机 Edge 能连上并快速看到图
+#   ⑥ 中文文件名/路径没问题
+# 任何一条不成立，就说明方案要换形态 —— 所以这一步必须先做，且只花半天。
+#
+# 用法：
+#   1. 把整个 tools/slice/ 目录拷到 NAS 的一个共享目录里，例如 /volume1/docker/snap-slice/
+#   2. 改下面 volumes 里 /data 那一行的左侧路径，指向你要浏览的照片目录
+#   3. 极空间 → Docker → Compose 项目 → 新建，粘贴本文件内容 → 部署
+
+services:
+  snap-slice:
+    # 用官方镜像，不自己构建 → 不需要镜像仓库账号，也没有"自制镜像怎么送进 NAS"的问题
+    image: node:22-bookworm-slim
+    container_name: snap-slice
+    working_dir: /app
+    # 首次启动会联网装 sharp（约 1–2 分钟）；换国内镜像源可加速
+    command: sh -c "npm install --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com && node server.mjs"
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./:/app                     # 代码 + node_modules 都留在 NAS 上 → 改代码只需改文件再重启容器
+      - /volume1/请改成你的照片目录:/data:ro   # ← 只读挂载！纵切阶段不写任何文件，最安全
+      - ./cache:/cache              # 缩略图缓存
+    environment:
+      SNAP_ROOTS: /data
+      SNAP_CACHE: /cache
+      PORT: "8787"
+      TZ: Asia/Shanghai             # 时区：影响 mtime 的展示
+    restart: unless-stopped

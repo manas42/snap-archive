@@ -2,3 +2,12 @@ node_modules/
 .DS_Store
 .deepseek/
 .npm-cache/
+
+# NAS 凭据（绝不入库）
+nas-creds
+.nas-cred
+
+# 方案与调研文档：含 NAS 私有信息，只保留在本地，不入库
+docs/
+*.local.md
+.certs/
