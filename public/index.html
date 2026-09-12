@@ -475,7 +475,7 @@ async function place(srcHref, srcName, srcSize, destDir) {
 
   if (mv.status === 405 || mv.status === 502 || mv.status === 500) {
     const cp = await attempt('COPY');
-    if (!cp.ok) { const e = new Error(`跨盘复制失败 HTTP ${cp.status} ${cp.body||''}`); e.status = cp.status; throw e; }
+    if (!cp.ok) { const e = new Error(`跨盘复制失败 HTTP ${cp.status}（原 MOVE 返回 ${mv.status}）${cp.body||''}`); e.status = cp.status; throw e; }
     const info = await statOf(ORIGIN + cp.destHref);
     if (!info || info.dir) throw new Error('复制后目标不存在 —— 已保留源文件，未删除');
     if (srcSize > 0 && info.size !== srcSize)
@@ -1529,7 +1529,7 @@ $('gridNext').onclick = () => gridStep(1);
 $('sortNew').onclick = () => setSort('mtime-desc');
 $('sortOld').onclick = () => setSort('mtime-asc');
 $('clearTargets').onclick = () => {
-  if (!confirm('清空 20 个目标槽位和「丢弃」目录？\n源目录与撤销栈会保留，磁盘上的文件一个都不会动。')) return;
+  if (!confirm(`清空 ${SLOT_N} 个目标槽位和「丢弃」目录？\n源目录与撤销栈会保留，磁盘上的文件一个都不会动。`)) return;
   S.targets = new Array(SLOT_N).fill(null); S.del = null;
   scheduleSave(); renderSetup(); renderSlots();
   toast('已清空目标（源与撤销栈保留）', 'ok');
