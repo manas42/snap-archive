@@ -159,7 +159,8 @@
     100%{box-shadow:0 0 0 16px rgba(63,185,80,0);border-color:var(--line)}
   }
   .tools{display:flex;gap:6px;margin-top:7px}
-  .tools .btn{flex:1;font-size:12.5px}
+  .tools .btn{flex:1;font-size:12px;padding:0 6px}
+  .tools .btn .cnt{font-size:10px;color:var(--acc);margin-left:3px;vertical-align:super}
 
   /* ---------- 抽屉 / 弹层 ---------- */
   .sheet{position:fixed;inset:0;z-index:30;display:none;background:rgba(4,7,11,.72);backdrop-filter:blur(4px);
@@ -211,6 +212,19 @@
   .toast.ok{border-color:#1d5c2a} .toast.err{border-color:#6e2b28;color:#ffb4ae} .toast.warn{border-color:#5c4a1d;color:#f0d089}
   .note{font-size:11.5px;color:var(--dim-2);line-height:1.9;padding:12px 2px 4px}
   .note b{color:var(--dim)}
+  /* 图集：4 列 × 5 行 = 每页 20 张 */
+  .gbar{display:flex;gap:6px;align-items:center;margin-bottom:10px}
+  .gbar .sp{flex:1}
+  .gbar .btn{min-height:38px;font-size:12px;padding:0 10px}
+  .gbar .btn.on{background:linear-gradient(180deg,#2f6fd0,#255bb0);border-color:#3b7de0;color:#fff}
+  .pag{font-size:12px;color:var(--dim);white-space:nowrap}
+  .ggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .gcell{position:relative;aspect-ratio:1;border-radius:10px;border:1px solid var(--line);
+    overflow:hidden;background:var(--panel-2);padding:0}
+  .gcell img,.gcell video{width:100%;height:100%;object-fit:cover;display:block}
+  .gcell.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(76,154,255,.5)}
+  .gcell .v{position:absolute;right:3px;bottom:3px;font-size:10px;background:rgba(0,0,0,.65);border-radius:4px;padding:0 3px}
+  .gcell .d{position:absolute;left:3px;top:3px;font-size:9px;background:rgba(0,0,0,.6);border-radius:4px;padding:0 4px;color:var(--dim)}
 </style>
 </head>
 <body>
@@ -243,6 +257,7 @@
   <div class="tools">
     <button class="btn" id="undo">↶ 撤销</button>
     <button class="btn" id="discard">🗑 丢弃</button>
+    <button class="btn" id="gridOpen">▦ 图集</button>
     <button class="btn primary" id="setup">⚙ 设置</button>
   </div>
 </footer>
@@ -282,6 +297,7 @@
     </div>
     <div class="foot">
       <button class="btn ghost" id="clearAll">全部清空</button>
+      <button class="btn" id="clearTargets">清空目标</button>
       <button class="btn" id="reloadCfg">重新读取</button>
       <button class="btn primary" data-close="setupSheet">完成</button>
     </div>
@@ -311,6 +327,26 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- ============ 图集：分页栅格 ============ -->
+<div class="sheet" id="gridSheet">
+  <div class="card">
+    <h2><span id="gridTitle">图集</span><span class="sp"></span><button class="btn ghost icon" data-close="gridSheet">✕</button></h2>
+    <div class="body">
+      <div class="gbar">
+        <button class="btn" id="sortNew">新 → 旧</button>
+        <button class="btn" id="sortOld">旧 → 新</button>
+        <span class="sp"></span>
+        <span class="pag" id="gridPage">— / —</span>
+      </div>
+      <div class="ggrid" id="gridBox"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="gridPrev">‹ 上一页</button>
+      <button class="btn" id="gridNext">下一页 ›</button>
+    </div>
+  </div>
+</div>
+
 <script>
 'use strict';
 /* ==========================================================================
@@ -331,11 +367,13 @@ const CFG_URL = ORIGIN + DIR + 'snap-config.json';   // 绝对 URL：页面若�
 const CFG_LS = 'snap.config.cache';
 const FILTER_LS = 'snap.filter';
 const AUTOPLAY_LS = 'snap.autoplay';
+const SORT_LS = 'snap.sort';
 const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
 const VID = new Set(['mp4','webm']);
 const SLOT_N = 20;                              // 4 列 × 5 行；底部默认只露 3 行，可上下滑
 const MAX_UNDO = 50;                            // 撤销栈深度（与桌面版一致）
+const GRID_PER_PAGE = 20;                       // 图集每页 4 列 × 5 行
 
 const dec = decodeURIComponent;
 const enc = encodeURIComponent;
@@ -351,6 +389,7 @@ const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() ||
 
 const S = {
   cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true,
+  sortMode: 'mtime-desc', gridPage: 0,
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
   undoStack: [], busy: false, counts: {},
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
@@ -444,27 +483,40 @@ async function place(srcHref, srcName, srcSize, destDir) {
 function snapshot() {
   return {
     version: 1, source: S.source, targets: S.targets, del: S.del,
-    filter: S.filter, autoplay: S.autoplay,
+    filter: S.filter, autoplay: S.autoplay, sort: S.sortMode,
     undo: S.undoStack.slice(-MAX_UNDO),          // 撤销栈也持久化，刷新/换设备后还能继续撤销
     updated: new Date().toISOString(),
   };
 }
 function applyConfig(c) {
   if (!c || typeof c !== 'object') return false;
-  if (c.source && c.source.path) S.source = { path:c.source.path, name:c.source.name || labelOf(c.source.path) };
+  if (c.source && c.source.path) S.source = { path: normPath(c.source.path), name: c.source.name || labelOf(c.source.path) };
   if (Array.isArray(c.targets)) {
     S.targets = c.targets.slice(0,SLOT_N)
-      .map((t) => (t && t.path) ? { path:t.path, name:t.name || labelOf(t.path) } : null)
+      .map((t) => (t && t.path) ? { path: normPath(t.path), name: t.name || labelOf(t.path) } : null)
       .concat(new Array(SLOT_N).fill(null)).slice(0,SLOT_N);
   }
-  if (c.del && c.del.path) S.del = { path:c.del.path, name:c.del.name || labelOf(c.del.path) };
+  if (c.del && c.del.path) S.del = { path: normPath(c.del.path), name: c.del.name || labelOf(c.del.path) };
   if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
   if (typeof c.autoplay === 'boolean') S.autoplay = c.autoplay;
+  if (c.sort === 'mtime-asc' || c.sort === 'mtime-desc') S.sortMode = c.sort;
   if (Array.isArray(c.undo)) {
     S.undoStack = c.undo
       .filter((r) => r && typeof r.backDir === 'string' && typeof r.name === 'string' && typeof r.from === 'string')
       .slice(-MAX_UNDO);
   }
+  // 清理历史遗留的重复：同一目录不占两个槽位；目标/丢弃不能等于源（旧版本可能存成这样）
+  const seen = new Set();
+  if (S.source && S.source.path) seen.add(S.source.path);
+  let cleaned = false;
+  S.targets = S.targets.map((t) => {
+    if (!t) return null;
+    if (seen.has(t.path)) { cleaned = true; return null; }
+    seen.add(t.path);
+    return t;
+  });
+  if (S.del && seen.has(S.del.path)) { S.del = null; cleaned = true; }
+  configCleaned = cleaned;
   return true;
 }
 async function loadConfig() {
@@ -473,6 +525,7 @@ async function loadConfig() {
     if (r.ok) {
       const c = JSON.parse(await r.text());
       applyConfig(c);
+      if (configCleaned) scheduleSave();     // 清理过重复记录就顺手存回去
       setSync('ok', '配置已载入');
       return true;
     }
@@ -486,6 +539,7 @@ async function loadConfig() {
   return false;
 }
 let saveTimer = null;
+let configCleaned = false;      // 载入配置时清理过重复项 → 直接落盘
 function scheduleSave() {
   S.dirty = true; setSync('on', '待保存…');
   clearTimeout(saveTimer);
@@ -521,8 +575,7 @@ async function openSource(dir) {
     S.cwd = dir.endsWith('/') ? dir : dir + '/';
     S.dirs = items.filter((e) => e.dir);
     S.raw = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
-    S.raw.sort((a,b) => b.mtime - a.mtime);
-    showList(true);                     // 换目录后从第 1 个开始
+    showList(true);                     // 换目录后从第 1 个开始（内部会按当前排序规则排好）
     if (!S.dirty) setSync('', '已同步');
   } catch (e) {
     toast(e.message, 'err', 5000);
@@ -542,13 +595,86 @@ function buildFiles() {
     : f === 'image' ? IMG.has(extOf(e.name)) : VID.has(extOf(e.name)));
 }
 
+/** 按修改时间排序（桌面版同款：新→旧 / 旧→新）
+ *  注意 WebDAV 的 getlastmodified 只有秒级精度，同一秒的连拍照片会打平 ——
+ *  所以时间相同时按文件名自然序稳定兜底（桌面版也是这个规则） */
+function sortRaw() {
+  const dir = S.sortMode === 'mtime-asc' ? 1 : -1;
+  S.raw.sort((a, b) => (a.mtime - b.mtime) * dir
+    || String(a.name).localeCompare(String(b.name), 'zh', { numeric: true }));
+}
+
 /** 重算列表并渲染。resetIndex=true 时回到第 1 个（切换媒体类型用） */
 function showList(resetIndex) {
+  sortRaw();
   buildFiles();
   S.index = resetIndex ? 0 : Math.min(S.index, Math.max(0, S.files.length - 1));
   updateFilterUI();
   render();
   preload();
+}
+
+/** 切换排序：尽量停在当前这张，别让人找不到 */
+function setSort(mode) {
+  S.sortMode = (mode === 'mtime-asc') ? 'mtime-asc' : 'mtime-desc';
+  try { localStorage.setItem(SORT_LS, S.sortMode); } catch(e){}
+  const cur = S.files[S.index];
+  sortRaw(); buildFiles();
+  const i = cur ? S.files.findIndex((f) => f.href === cur.href) : -1;
+  S.index = i >= 0 ? i : 0;
+  updateSortUI(); render(); preload();
+  if ($('gridSheet').classList.contains('on')) { S.gridPage = Math.floor(S.index / GRID_PER_PAGE); renderGrid(); }
+  scheduleSave();
+  toast('排序：' + (S.sortMode === 'mtime-asc' ? '旧 → 新' : '新 → 旧'), 'ok', 1400);
+}
+
+function updateSortUI() {
+  const n = $('sortNew'), o = $('sortOld');
+  if (n) n.classList.toggle('on', S.sortMode !== 'mtime-asc');
+  if (o) o.classList.toggle('on', S.sortMode === 'mtime-asc');
+}
+
+/* ---------------- 图集：4 列 × 5 行分页 ---------------- */
+function openGrid() {
+  if (!S.files.length) { toast('当前目录里没有可浏览的图片或视频', 'warn'); return; }
+  S.gridPage = Math.floor(S.index / GRID_PER_PAGE);
+  $('gridTitle').textContent = '图集 · ' + (S.cwd ? labelOf(S.cwd) : '') + '（' + S.files.length + '）';
+  $('gridSheet').classList.add('on');
+  updateSortUI();
+  renderGrid();
+}
+
+function renderGrid() {
+  const box = $('gridBox'); box.innerHTML = '';
+  const pages = Math.max(1, Math.ceil(S.files.length / GRID_PER_PAGE));
+  S.gridPage = Math.min(Math.max(0, S.gridPage), pages - 1);
+  const start = S.gridPage * GRID_PER_PAGE;
+  S.files.slice(start, start + GRID_PER_PAGE).forEach((f, k) => {
+    const gi = start + k;
+    const isV = VID.has(extOf(f.name));
+    const b = document.createElement('button');
+    b.className = 'gcell' + (gi === S.index ? ' sel' : '');
+    b.innerHTML = (isV
+        ? `<video src="${f.href}#t=0.1" preload="metadata" muted playsinline></video><span class="v">▶</span>`
+        : `<img loading="lazy" src="${f.href}" alt="">`)
+      + `<span class="d">${gi + 1}</span>`;
+    b.onclick = () => {
+      S.index = gi;
+      $('gridSheet').classList.remove('on');
+      renderStage(); renderFilm(); preload();
+    };
+    box.append(b);
+  });
+  $('gridPage').textContent = `${S.gridPage + 1} / ${pages}`;
+  $('gridPrev').disabled = S.gridPage <= 0;
+  $('gridNext').disabled = S.gridPage >= pages - 1;
+}
+
+function gridStep(d) {
+  S.gridPage += d;
+  renderGrid();
+  const body = $('gridSheet').querySelector('.body');
+  if (body) body.scrollTop = 0;
 }
 
 function updateFilterUI() {
@@ -626,6 +752,14 @@ function renderStage() {
       hint.innerHTML = `<span class="big">🖼️</span>这个目录里没有图片或视频<br>用「⚙ 设置」换目录，或点上面的子目录`;
     }
     renderBadge(null);
+    if (canDeleteSource()) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.style.cssText = 'margin-top:14px;color:var(--bad);border-color:#6e2b28';
+      b.textContent = '🗑 删除这个空文件夹';
+      b.onclick = deleteSourceDir;
+      hint.append(document.createElement('br'), b);
+    }
     if (S.dirs.length) {
       S.dirs.slice(0,12).forEach((d) => {
         const b = document.createElement('button');
@@ -729,7 +863,7 @@ function renderSlots() {
   const n = S.undoStack.length;
   const ub = $('undo');
   ub.disabled = n === 0;
-  ub.textContent = n > 0 ? `↶ 撤销 (${n})` : '↶ 撤销';
+  ub.innerHTML = n > 0 ? `↶ 撤销<span class="cnt">${n}</span>` : '↶ 撤销';
   ub.title = n > 0 ? `撤销最近一次移动，还可撤销 ${n} 步` : '没有可撤销的操作';
   $('discard').disabled = false;
   updateSlotsFade();
@@ -832,6 +966,81 @@ function dropUndo(rec) {
   renderSlots();
 }
 
+/* ---------------- 删除空文件夹（桌面版的收尾动作） ---------------- */
+function canDeleteSource() {
+  return !!(S.source && S.source.path && S.cwd === S.source.path && S.files.length === 0 && S.raw.length === 0);
+}
+
+/** 搬运一个子目录（集合）。跨盘时 MOVE 会 405 —— 明确拒绝，不猜也不硬来 */
+async function moveCollection(srcHref, name, destDir) {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const suffix = dot > 0 ? name.slice(dot) : '';
+  for (let i = 0; i < 50; i++) {
+    const finalName = i === 0 ? name : `${stem} (${i})${suffix}`;
+    const dest = joinEnc(destDir, finalName);
+    const r = await fetch(srcHref, { method:'MOVE', credentials:'same-origin',
+      headers:{ 'Destination': ORIGIN + dest, 'Overwrite':'F' } });
+    if (r.status >= 200 && r.status < 300) return finalName;
+    if (r.status === 412) continue;
+    if (r.status === 405 || r.status === 502)
+      throw new Error(`子目录「${name}」在另一块磁盘上，无法自动搬运，请手动处理后再删`);
+    throw new Error(`搬运子目录失败 HTTP ${r.status}`);
+  }
+  throw new Error('同名目录过多');
+}
+
+async function deleteSourceDir() {
+  if (S.busy) return;
+  const dir = S.source && S.source.path;
+  if (!dir) { toast('还没有设置待分类目录', 'warn'); return; }
+  S.busy = true;
+  try {
+    const list = await propfind(ORIGIN + dir, 1);
+    if (!list) throw new Error('目录已经不存在了');
+    const entries = list.filter((e) => normPath(e.href) !== normPath(dir));
+    let movedOut = 0;
+    if (entries.length) {
+      const names = entries.slice(0, 4).map((e) => e.name).join('、');
+      const more = entries.length > 4 ? ` 等共 ${entries.length} 项` : '';
+      if (!S.del) throw new Error(`目录里还有 ${entries.length} 项（${names}${more}），但没设置「丢弃」目录，无法自动搬走`);
+      if (!confirm(`待分类目录里还有 ${entries.length} 项没处理：\n${names}${more}\n\n`
+        + `把它们全部搬进「${S.del.name}」，然后删除这个目录？\n（这一步不可撤销）`)) return;
+      const destDir = normPath(S.del.path);
+      for (const e of entries) {
+        if (e.dir) await moveCollection(e.href, e.name, destDir);
+        else await place(e.href, e.name, e.size, destDir);
+        movedOut++;
+      }
+    } else if (!confirm(`删除空目录「${S.source.name}」？\n（不可撤销；磁盘上的这个文件夹会被删掉）`)) {
+      return;
+    }
+    // 删之前再确认一次真的空了（避免 Delete 一个非空目录被拒后状态混乱）
+    const again = await propfind(ORIGIN + dir, 1);
+    const left = (again || []).filter((e) => normPath(e.href) !== normPath(dir));
+    if (left.length) throw new Error(`目录里还有 ${left.length} 项没清空，已中止删除`);
+    const d = await fetch(ORIGIN + dir, { method:'DELETE', credentials:'same-origin' });
+    if (d.status !== 204 && d.status !== 200)
+      throw new Error('删除目录失败 HTTP ' + d.status + '（只有空目录能删）');
+
+    // 撤销栈里"退回这个目录"的步骤已无法执行，清掉并如实告知
+    const before = S.undoStack.length;
+    S.undoStack = S.undoStack.filter((r) => normPath(r.backDir) !== normPath(dir));
+    const dropped = before - S.undoStack.length;
+    const goneName = S.source.name, delName = S.del ? S.del.name : '丢弃';
+    S.source = null;
+    S.cwd = null; S.raw = []; S.files = []; S.index = 0;
+    scheduleSave();
+    renderHeader(); renderSlots(); render();
+    await openSource(parentOf(dir));
+    toast(`已删除「${goneName}」`
+      + (movedOut ? `，${movedOut} 项已搬进「${delName}」` : '')
+      + (dropped ? `；${dropped} 步撤销已失效并移除` : ''), 'ok', 4500);
+  } catch (e) {
+    toast(e.message, 'err', 6000);
+  } finally { S.busy = false; }
+}
+
 /* ---------------- 设置面板 ---------------- */
 function openSetup() {
   renderSetup();
@@ -860,7 +1069,15 @@ function renderSetup() {
   sb.append(rowFor('源', S.source,
     () => openPicker('source', -1, 'setup'),
     () => setSource(S.cwd),
-    () => { S.source = null; scheduleSave(); renderSetup(); renderHeader(); }));
+    () => setSource(null)));
+  if (canDeleteSource()) {
+    const db = document.createElement('button');
+    db.className = 'btn';
+    db.style.cssText = 'margin-top:8px;width:100%;color:var(--bad);border-color:#6e2b28';
+    db.textContent = '🗑 删除这个空文件夹（已处理完）';
+    db.onclick = () => { $('setupSheet').classList.remove('on'); deleteSourceDir(); };
+    sb.append(db);
+  }
 
   const tb = $('setupTargets'); tb.innerHTML = '';
   for (let i=0;i<SLOT_N;i++) {
@@ -882,12 +1099,57 @@ function renderSetup() {
   + `· 长按或右键槽位也能快速改；「⚙ 批量勾选子目录」可以一次挑多个<br>`
   + `· 当前源在存储池 <b>${esc(srcPool || '—')}</b>`;
 }
-function setSource(path) { S.source = path ? { path, name: labelOf(path) } : null; scheduleSave(); renderSetup(); renderHeader(); }
-function setTarget(i, path) {
-  S.targets[i] = path ? { path, name: labelOf(path) } : null;
-  scheduleSave(); renderSetup(); renderSlots();
+/** 目录归属冲突检查：同一个目录不能既是源又是目标，也不能占两个槽位 */
+const normPath = (p) => { const s = String(p || ''); return s.endsWith('/') ? s : s + '/'; };
+function conflictWith(path, { selfSlot = -1, selfSource = false, selfDel = false } = {}) {
+  const p = normPath(path);
+  for (let i = 0; i < SLOT_N; i++) {
+    if (i === selfSlot) continue;
+    if (S.targets[i] && normPath(S.targets[i].path) === p) return { kind:'slot', i };
+  }
+  if (!selfDel && S.del && normPath(S.del.path) === p) return { kind:'del' };
+  if (!selfSource && S.source && normPath(S.source.path) === p) return { kind:'source' };
+  return null;
 }
-function setDel(path) { S.del = path ? { path, name: labelOf(path) } : null; scheduleSave(); renderSetup(); }
+function conflictMsg(d, path) {
+  const n = labelOf(path);
+  if (d.kind === 'slot') return `「${n}」已经在槽位 ${d.i + 1} 了，不能重复添加`;
+  if (d.kind === 'del')  return `「${n}」已经是「丢弃」目录了`;
+  return `「${n}」是当前的待分类（源）目录，不能设为目标`;
+}
+
+function setSource(path) {
+  if (path) {
+    const d = conflictWith(path, { selfSource: true });
+    if (d) { toast(conflictMsg(d, path), 'warn', 4000); return false; }
+  }
+  S.source = path ? { path: normPath(path), name: labelOf(path) } : null;
+  scheduleSave(); renderSetup(); renderHeader();
+  return true;
+}
+function setTarget(i, path) {
+  if (path) {
+    const d = conflictWith(path, { selfSlot: i });
+    if (d) { toast(conflictMsg(d, path), 'warn', 4000); return false; }
+  }
+  S.targets[i] = path ? { path: normPath(path), name: labelOf(path) } : null;
+  scheduleSave(); renderSetup(); renderSlots();
+  return true;
+}
+function setDel(path) {
+  if (path) {
+    const d = conflictWith(path, { selfDel: true });
+    if (d) {
+      const n = labelOf(path);
+      toast(d.kind === 'slot' ? `「${n}」是槽位 ${d.i + 1} 的目标目录，不能同时当丢弃目录`
+        : `「${n}」是当前的待分类（源）目录，不能当丢弃目录`, 'warn', 4000);
+      return false;
+    }
+  }
+  S.del = path ? { path: normPath(path), name: labelOf(path) } : null;
+  scheduleSave(); renderSetup();
+  return true;
+}
 
 async function refreshCounts() {
   for (let i=0;i<SLOT_N;i++) {
@@ -1076,6 +1338,17 @@ $('discard').onclick = () => {
   classify(S.del, null);
 };
 $('setup').onclick = openSetup;
+$('gridOpen').onclick = openGrid;
+$('gridPrev').onclick = () => gridStep(-1);
+$('gridNext').onclick = () => gridStep(1);
+$('sortNew').onclick = () => setSort('mtime-desc');
+$('sortOld').onclick = () => setSort('mtime-asc');
+$('clearTargets').onclick = () => {
+  if (!confirm('清空 20 个目标槽位和「丢弃」目录？\n源目录与撤销栈会保留，磁盘上的文件一个都不会动。')) return;
+  S.targets = new Array(SLOT_N).fill(null); S.del = null;
+  scheduleSave(); renderSetup(); renderSlots();
+  toast('已清空目标（源与撤销栈保留）', 'ok');
+};
 $('batchBtn').onclick = () => openPicker('batch', -1, 'setup');
 $('fillBtn').onclick = () => {
   if (!S.cwd) { toast('先选一个待分类目录', 'warn'); return; }
@@ -1101,6 +1374,14 @@ $('reloadCfg').onclick = async () => { await loadConfig(); renderSetup(); render
 // 槽位区滚动时更新"下面还有"的渐隐提示
 $('slotsWrap').addEventListener('scroll', updateSlotsFade, { passive: true });
 window.addEventListener('resize', updateSlotsFade);
+// 从别的 App 切回来时重新校准目标计数（与桌面版 visibilitychange 行为对齐，30 秒内不重复扫）
+let lastCountsAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - lastCountsAt < 30000) return;
+  lastCountsAt = Date.now();
+  refreshCounts();
+});
 document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => {
     $(b.dataset.close).classList.remove('on');
@@ -1127,9 +1408,11 @@ document.addEventListener('keydown', (e) => {
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
   try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
   try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}
+  try { const ls = localStorage.getItem(SORT_LS); if (ls) S.sortMode = ls; } catch(e){}
   buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
   updateFilterUI();
   updateAutoplayUI();
+  updateSortUI();
   renderSlots(); renderHeader();
   setSync('on', '载入配置…');
   await loadConfig();
