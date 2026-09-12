@@ -106,10 +106,6 @@
   .badge{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
   .badge span{background:rgba(7,10,14,.72);backdrop-filter:blur(6px);border:1px solid var(--line-soft);
     border-radius:20px;padding:4px 10px;font-size:11px;color:var(--dim)}
-  .empty-dirs{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;overflow-x:auto;
-    padding:8px;background:linear-gradient(0deg,rgba(7,10,14,.9),transparent)}
-  .empty-dirs button{flex:0 0 auto;min-height:38px;font-size:12px;border-radius:20px;padding:0 12px;
-    background:var(--panel);border:1px solid var(--line);color:var(--dim)}
 
   .film{flex:0 0 auto;display:flex;gap:6px;overflow-x:auto;padding:7px 8px;border-top:1px solid var(--line-soft);
     scrollbar-width:none}
@@ -120,8 +116,9 @@
   .th.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(76,154,255,.35)}
   .th .v{position:absolute;right:3px;bottom:3px;font-size:9px;background:rgba(0,0,0,.65);
     border-radius:4px;padding:0 3px}
-  .th.dir{display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim);
-    line-height:1.15;text-align:center;padding:2px;background:var(--panel-2)}
+  .th.dir{display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dim);
+    width:78px;padding:2px 4px;line-height:1.2;word-break:break-all;text-align:center;
+    background:var(--panel-2)}
 
   /* ---------- 底部槽位（20 个 = 4 列 × 5 行；默认只露 3 行，可上下滑） ---------- */
   footer{flex:0 0 auto;border-top:1px solid var(--line-soft);background:rgba(11,15,20,.85);backdrop-filter:blur(12px);
@@ -246,7 +243,6 @@
     <div class="spinner" id="spin"></div>
     <div class="hint" id="hint"><span class="big">🖼️</span>先选一个「待分类」目录<br>然后在下面配置目标目录</div>
     <div class="badge" id="badge"></div>
-    <div class="empty-dirs" id="quickDirs"></div>
   </div>
   <div class="film" id="film"></div>
 </main>
@@ -740,12 +736,10 @@ function renderHeader() {
 
 function renderStage() {
   const st = $('stage');
-  // 清掉上一张图/视频与播放键，保留 spinner / hint / badge / quickDirs
+  // 清掉上一张图/视频与播放键，保留 spinner / hint / badge
   st.querySelectorAll('img,video,.playbtn').forEach((n)=>n.remove());
   const hint = $('hint');
   const f = S.files[S.index];
-  const qd = $('quickDirs');
-  qd.innerHTML = '';
   if (!f) {
     hint.style.display = '';
     const fname = { all:'图片或视频', image:'图片', video:'视频' }[S.filter] || '媒体';
@@ -755,7 +749,9 @@ function renderStage() {
       hint.innerHTML = `<span class="big">🔍</span>当前筛选（仅${fname}）下没有文件<br>`
         + `这个目录另有 <b>${S.raw.length}</b> 个其它媒体<br>点右上角的媒体类型按钮可切换`;
     } else {
-      hint.innerHTML = `<span class="big">🖼️</span>这个目录里没有图片或视频<br>用「⚙ 设置」换目录，或点上面的子目录`;
+      // 子目录入口统一放在下面的缩略图条（📁），这里不再重复列一排
+      hint.innerHTML = `<span class="big">🖼️</span>这个目录里没有图片或视频<br>`
+        + (S.dirs.length ? '点下面的 📁 进入子目录' : '用「⚙ 设置」换一个目录');
     }
     renderBadge(null);
     if (canDeleteSource()) {
@@ -765,14 +761,6 @@ function renderStage() {
       b.textContent = '🗑 删除这个空文件夹';
       b.onclick = deleteSourceDir;
       hint.append(document.createElement('br'), b);
-    }
-    if (S.dirs.length) {
-      S.dirs.slice(0,12).forEach((d) => {
-        const b = document.createElement('button');
-        b.textContent = '📁 ' + d.name;
-        b.onclick = () => goToDir(d.href);
-        qd.append(b);
-      });
     }
     return;
   }
