@@ -1,8 +1,8 @@
 # Snap Archive 手机版设计文档（零服务端 WebDAV 版）
 
-> 本文由仓库现有实现反推而来，唯一依据是 `public/index.html`（单文件，1633 行）与 `tools/deploy-webdav.sh`。
-> **行号基准**：文中行号对应 `public/index.html` 的 **1633 行**版本（本文写作时的当前工作区版本）。代码一旦改动，行号会整体漂移，越靠近文件末尾偏得越多；**追溯时请以函数名 / 常量名 / 字符串文案为准**，行号只用于快速定位。
-> 文中括注的「行号 / 函数名 / 常量名」均指 `public/index.html`（除特别说明）。
+> 本文由仓库现有实现反推而来，唯一依据是 `mobile/index.html`（单文件，1633 行）与 `tools/deploy-webdav.sh`。
+> **行号基准**：文中行号对应 `mobile/index.html` 的 **1633 行**版本（本文写作时的当前工作区版本）。代码一旦改动，行号会整体漂移，越靠近文件末尾偏得越多；**追溯时请以函数名 / 常量名 / 字符串文案为准**，行号只用于快速定位。
+> 文中括注的「行号 / 函数名 / 常量名」均指 `mobile/index.html`（除特别说明）。
 > 为便于公开，示例中的主机、账号、存储池与目录名一律使用占位符（`192.0.2.10`、`ACCOUNT`、`pool-a` / `pool-b`、`photos/`、`to-sort/`）。
 
 ---
@@ -16,7 +16,7 @@
 
 | 维度 | 取值 |
 | --- | --- |
-| 交付物 | 单个 HTML 文件（`public/index.html`），内联 CSS 与 JS，零依赖、零构建 |
+| 交付物 | 单个 HTML 文件（`mobile/index.html`），内联 CSS 与 JS，零依赖、零构建 |
 | 后端 | **没有后端**。所有文件操作直接对**同源 WebDAV** 说话 |
 | 数据面 | 照片/视频始终留在 NAS 上，应用只发 `PROPFIND` / `MOVE` / `COPY` / `DELETE`（`GET` 由 `<img>` / `<video>` 隐式发起） |
 | 配置面 | 与本页同目录的 `snap-config.json`，用 WebDAV 的 `GET` / `PUT` 读写（`CFG_URL`） |
@@ -36,14 +36,25 @@
 
 ### 2.1 文件放在哪
 
-唯一必须部署的是 `public/index.html`；运行时唯一会产生/更新的附带文件是它旁边的 `snap-config.json`。
+唯一必须部署的是 `mobile/index.html`；运行时唯一会产生/更新的附带文件是它旁边的 `snap-config.json`。
 `tools/deploy-webdav.sh` 的典型用法（脚本头部注释）：
 
 ```bash
-bash tools/deploy-webdav.sh public/index.html /pool-a/snap-app/index.html   # 单文件
-bash tools/deploy-webdav.sh public/ /pool-a/snap-app/                      # 目录 → 递归上传
-DAV_ROOT=/pool-a/snap-app bash tools/deploy-webdav.sh public/              # 或用环境变量
+bash tools/deploy-webdav.sh mobile/index.html /pool-a/snap-archive-app/index.html   # 单文件
+bash tools/deploy-webdav.sh mobile/ /pool-a/snap-archive-app/                      # 目录 → 递归上传
+DAV_ROOT=/pool-a/snap-archive-app bash tools/deploy-webdav.sh mobile/              # 或用环境变量
 ```
+
+NAS 上这个 `snap-archive-app/` 是手机版的**专用目录**，约定只有两样东西：
+
+```
+/pool-a/snap-archive-app/
+  index.html          ← 部署上去的应用页（唯一入口，必须用完整文件地址打开）
+  snap-config.json    ← 运行时自动生成/更新，跟页面同目录
+  test/               ← 配套测试语料（源目录、若干目标目录、丢弃目录），非应用运行所需
+```
+
+目录名之所以带 `-app` 后缀：同级的 `test/` 只是语料，真正被手机收藏的入口是 `.../snap-archive-app/index.html`。
 
 脚本要点：
 
@@ -457,10 +468,12 @@ const CFG_URL = ORIGIN + DIR + 'snap-config.json';
 
 两者是**同一交互模型的两次实现**：一个待分类目录 + 若干目标槽位（+ 一个丢弃槽位），一次处理一张，纯人工分类。差异都来自运行环境的约束。
 
-| 维度 | 桌面版（`index.html` + `style.css` + `app.js` + `server.js`） | 手机版（`public/index.html` 单文件） |
+两套实现**在仓库里各占一个目录**：桌面版是 `webapp/`（多文件），手机版是 `mobile/index.html`（单文件），两者**不共享任何代码**，也不需要一起部署。
+
+| 维度 | 桌面版（`webapp/`：`index.html` + `style.css` + `app.js` + `server.js`） | 手机版（`mobile/index.html` 单文件） |
 | --- | --- | --- |
 | 文件访问 | File System Access API（`showDirectoryPicker` / 拖放句柄） | 同源 WebDAV（`PROPFIND` / `MOVE` / `COPY` / `DELETE`） |
-| 是否需要后端 | 需要 `server.js` 仅为提供 `localhost` 安全上下文 | **不需要**，部署脚本直接把文件 `PUT` 到 NAS |
+| 是否需要后端 | 需要 `webapp/server.js` 仅为提供 `localhost` 安全上下文 | **不需要**，部署脚本直接把文件 `PUT` 到 NAS |
 | 运行条件 | Chrome/Edge + `http://localhost` | 任意现代手机浏览器 + 能访问 NAS 的 WebDAV |
 | 配置持久化 | IndexedDB 存 `FileSystemDirectoryHandle`（句柄无法字符串化） | NAS 上的 `snap-config.json`（+ `localStorage` 缓存） |
 | 启动行为 | 显示"恢复上次文件夹"横幅，用户点确认才恢复 | 直接用缓存渲染，再以 NAS 配置为准 |

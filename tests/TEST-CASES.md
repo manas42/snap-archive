@@ -1,6 +1,6 @@
 # Snap Archive 手机版 · 手工测试用例集
 
-> 本用例集**从 `public/index.html` 的代码反推**得到，步骤与文案以代码为准。
+> 本用例集**从 `mobile/index.html` 的代码反推**得到，步骤与文案以代码为准。
 > 凡代码里无法确认（依赖具体设备/浏览器/NAS 实现差异）之处，一律标注 **（需人工确认）**。
 
 ---
@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 应用名 | `Snap Archive` | `<title>Snap Archive</title>` |
 | 自述 | 「Snap Archive · 零服务端版（路线 B）」 | 脚本头部注释 |
-| 被测文件 | `public/index.html`（单文件、零依赖，`wc -l` 实测 **1633** 行） | 仓库 |
+| 被测文件 | `mobile/index.html`（单文件、零依赖，`wc -l` 实测 **1633** 行） | 仓库 |
 | 页面语言 | `<html lang="zh-CN">` | 代码 |
 | 存储后端 | 同源 WebDAV（`PROPFIND` / `GET` / `MOVE` / `COPY` / `DELETE` / `MKCOL` / `PUT`） | `propfind()` / `place()` / `saveConfig()` |
 | 配置文件 | 与本页**同目录**的 `snap-config.json`（`CFG_URL = origin + 页面目录 + 'snap-config.json'`） | `CFG_URL` |
@@ -21,7 +21,7 @@
 | 撤销栈上限 | `MAX_UNDO = 50` | `MAX_UNDO` |
 | 支持的媒体扩展名 | 图片：`jpg jpeg png gif webp avif bmp`；视频：`mp4 webm` | `IMG` / `VID` |
 
-**桌面版**（`index.html` + `app.js` + `server.js`）**不是本用例集的被测对象**，仅在需要对照行为时提及。
+**桌面版**（`webapp/` 下的 `index.html` + `app.js` + `style.css` + `server.js`）**不是本用例集的被测对象**，仅在需要对照行为时提及。
 
 > **行数与行号会随代码演进**：本文件里的行数（1633）只用于标记本用例集对应的代码快照。
 > 用例的追溯与复核请以**函数名**（如 `place()` / `undo()` / `applyBatch()` / `keydown` 处理器）
@@ -49,7 +49,8 @@
 | `http://192.0.2.10:5005` | NAS 的 WebDAV 入口（`192.0.2.10` 是 RFC 5737 文档用地址，永远不会是真实主机） |
 | `ACCOUNT` | 登录账号 |
 | `pool-a` / `pool-b` | 两个**不同的存储池/挂载点**（跨盘用例必须用它们） |
-| `/pool-a/snap-test/` | 本次测试部署应用的目录（含 `index.html` 与自动生成的 `snap-config.json`） |
+| `/pool-a/snap-archive-app/` | **正式部署目录**（线上在用的那个）：`index.html` + `snap-config.json` + `test/` 语料子目录。**本用例集不要动它**，列在这里只作对照 |
+| `/pool-a/snap-test/` | **本次测试的一次性部署目录**（含 `index.html` 与自动生成的 `snap-config.json`），跑完即删 |
 | `/pool-a/to-sort/` | 「待分类目录」（源） |
 | `/pool-a/target-a/`、`/pool-a/target-b/`、`/pool-a/target-c/` | 同盘目标目录 |
 | `/pool-b/target-x/` | 另一块盘上的目标目录（用于跨盘用例） |
@@ -82,13 +83,13 @@
 
 ```bash
 # 部署单文件到指定完整远端路径
-bash tools/deploy-webdav.sh public/index.html /pool-a/snap-test/index.html
+bash tools/deploy-webdav.sh mobile/index.html /pool-a/snap-test/index.html
 
 # 上传整个目录（递归；脚本会对子目录发 MKCOL）
-bash tools/deploy-webdav.sh public/ /pool-a/snap-test/
+bash tools/deploy-webdav.sh mobile/ /pool-a/snap-test/
 
 # 用环境变量给目标根目录
-DAV_ROOT=/pool-a/snap-test bash tools/deploy-webdav.sh public/
+DAV_ROOT=/pool-a/snap-test bash tools/deploy-webdav.sh mobile/
 ```
 
 脚本的真实行为（测试前需知道）：
@@ -1260,7 +1261,7 @@ DAV_ROOT=/pool-a/snap-test bash tools/deploy-webdav.sh public/
 16. 边界：`EDG-01` … `EDG-09`
 
 ### 阶段 D · 回归
-- 每次改动 `public/index.html` 后，至少重跑：`SMK-01`~`SMK-03`、`MOV-01`、`MOV-02`、`FLT-06`、`UND-06`、`DEL-04`、`DEL-05`、`XDS-02`、`SLT-08`、`SLT-10`、`KBD-05`、`KBD-06`、`ERR-07`。
+- 每次改动 `mobile/index.html` 后，至少重跑：`SMK-01`~`SMK-03`、`MOV-01`、`MOV-02`、`FLT-06`、`UND-06`、`DEL-04`、`DEL-05`、`XDS-02`、`SLT-08`、`SLT-10`、`KBD-05`、`KBD-06`、`ERR-07`。
 - 这几条覆盖了历史上出现过的坑：已移走文件「复活」、删除入口不出现、撤销栈不持久、跨盘丢文件、**图集打开时误移文件**、**批量添加绕过源/丢弃互斥**、**全部清空未清撤销栈**、**跨盘降级被误判为丢数据**。
 
 ---

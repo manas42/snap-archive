@@ -4,9 +4,9 @@
 # 作用：把本地文件 PUT 到 NAS WebDAV 上的目标目录。改前端 = 跑一次这个脚本。
 #
 # 用法：
-#   bash tools/deploy-webdav.sh public/index.html /pool-a/snap-test/index.html
-#   bash tools/deploy-webdav.sh public/ /pool-a/snap-app/          # 目录 → 递归上传
-#   DAV_ROOT=/pool-a/snap-app bash tools/deploy-webdav.sh public/
+#   bash tools/deploy-webdav.sh mobile/index.html /pool-a/snap-archive-app/index.html
+#   bash tools/deploy-webdav.sh mobile/ /pool-a/snap-archive-app/          # 目录 → 递归上传
+#   DAV_ROOT=/pool-a/snap-archive-app bash tools/deploy-webdav.sh mobile/
 #   第二个参数也可以直接粘贴完整 URL（脚本会自动剥掉 http://host:port）
 #
 # 凭据读 .nas-cred（支持 NAS_USER=xxx 或 username: xxx 两种写法；不 source、不进 argv）。

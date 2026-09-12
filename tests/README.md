@@ -4,11 +4,11 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `TEST-CASES.md` | 从 `public/index.html` 反推出来的 **122 条手工测试用例**（按模块分组，含步骤与可观察预期） |
+| `TEST-CASES.md` | 从 `mobile/index.html` 反推出来的 **122 条手工测试用例**（按模块分组，含步骤与可观察预期） |
 | `README.md`（本文件） | 怎么准备环境、怎么执行、怎么收尾、以及想做自动化时的思路 |
 
-被测对象只有 **`public/index.html`**（手机版，单文件零依赖，通过同源 WebDAV 直接操作 NAS 文件）。
-仓库根目录的 `index.html` / `app.js` / `server.js` 是**桌面版**，不在本测试集范围内。
+被测对象只有 **`mobile/index.html`**（手机版，单文件零依赖，通过同源 WebDAV 直接操作 NAS 文件）。
+`webapp/` 下的 `index.html` / `app.js` / `style.css` / `server.js` 是**桌面版**，不在本测试集范围内。
 
 ---
 
@@ -16,10 +16,10 @@
 
 - **纯手工执行**：用例里的「步骤」是给人（或给手机）做的操作，「预期结果」分「用户可见现象」和「WebDAV 侧可验证状态」两部分——后者可以用文件管理器、NAS 自带界面或 `curl` 直接核对。
 - **按阶段执行**：先跑冒烟（`SMK-*`），再跑非破坏性模块，最后跑破坏性与异常用例。`TEST-CASES.md` 第 21 节给了完整顺序。
-- **先看第 1 节与第 4 节**：前者记了被测版本（`public/index.html`，1633 行）与**槽位数量文案**的现状（设置面板标题、批量满槽提示、「清空目标」确认框都已跟随 `SLOT_N`，无硬编码残留）；后者是**测试数据准备与清理原则**，破坏性用例之前必读。
+- **先看第 1 节与第 4 节**：前者记了被测版本（`mobile/index.html`，1633 行）与**槽位数量文案**的现状（设置面板标题、批量满槽提示、「清空目标」确认框都已跟随 `SLOT_N`，无硬编码残留）；后者是**测试数据准备与清理原则**，破坏性用例之前必读。
 - **追溯方式**：用例按**函数名**（`place()` / `undo()` / `applyBatch()` / `keydown` 处理器）与 **DOM id**（`#slotN`、`#gridSheet`、`#undo`、`#browseSheet`）对应代码；行数只用来说明快照，不要依赖行号。
 - **标注「（需人工确认）」的条目**：这些依赖具体机型/浏览器/NAS 实现细节，或需要人为制造故障，执行时请把实际观察到的现象记下来，而不是套用文档里的猜测。
-- **一次改动一次回归**：改完 `public/index.html` 至少重跑 `TEST-CASES.md` 第 21 节「阶段 D」列出的那几条。
+- **一次改动一次回归**：改完 `mobile/index.html` 至少重跑 `TEST-CASES.md` 第 21 节「阶段 D」列出的那几条。
 
 ### 建议的执行记录
 
@@ -42,8 +42,10 @@
 
 **不要用真实的工作目录做破坏性测试。** 建议在 NAS 上建一组一次性目录（名字随意，下面沿用 `TEST-CASES.md` 里的命名）：
 
+> 注意区分两种「部署目录」：正式目录是 `/pool-a/snap-archive-app/`（应用页 + 在用的 `snap-config.json` + `test/` 语料子目录），**不要拿它跑本用例集**。测试一律另建一次性的部署目录，下面统一写作 `/pool-a/snap-test/`。
+
 ```
-/pool-a/snap-test/      ← 应用的部署目录（index.html + 自动生成的 snap-config.json）
+/pool-a/snap-test/      ← 本次测试的一次性部署目录（index.html + 自动生成的 snap-config.json）
 /pool-a/to-sort/        ← 「待分类」源目录（也可以叫 photos/，只要全篇一致）
 /pool-a/target-a/       ← 目标目录（同盘）
 /pool-a/target-b/       ← 目标目录（同盘）
@@ -82,13 +84,13 @@ curl -u ACCOUNT -T snap-config.backup.json http://192.0.2.10:5005/pool-a/snap-te
 
 ```bash
 # 单文件 → 完整远端文件路径
-bash tools/deploy-webdav.sh public/index.html /pool-a/snap-test/index.html
+bash tools/deploy-webdav.sh mobile/index.html /pool-a/snap-test/index.html
 
-# 整个 public/ 目录 → 递归上传（脚本会对子目录发 MKCOL）
-bash tools/deploy-webdav.sh public/ /pool-a/snap-test/
+# 整个 mobile/ 目录 → 递归上传（脚本会对子目录发 MKCOL）
+bash tools/deploy-webdav.sh mobile/ /pool-a/snap-test/
 
 # 目标根目录用环境变量给（适合反复部署）
-DAV_ROOT=/pool-a/snap-test bash tools/deploy-webdav.sh public/
+DAV_ROOT=/pool-a/snap-test bash tools/deploy-webdav.sh mobile/
 ```
 
 脚本的真实用法与限制（读自脚本头部注释与实现，未作推测）：
@@ -202,7 +204,7 @@ DAV_ROOT=/pool-a/snap-test bash tools/deploy-webdav.sh public/
 | --- | --- |
 | 打开地址看到的是一串文件列表 | 打开的是**目录地址**；请用完整文件地址（部署脚本会打印它）。 |
 | 页面一直提示认证失败 | 浏览器没有该 origin 的有效凭据，或密码错了；重新登录后**刷新页面**（提示语就是这么说的）。 |
-| 改了 `public/index.html` 但手机上看不到变化 | 没有重新部署；跑一次 `tools/deploy-webdav.sh`，然后在手机上强刷。 |
+| 改了 `mobile/index.html` 但手机上看不到变化 | 没有重新部署；跑一次 `tools/deploy-webdav.sh`，然后在手机上强刷。 |
 | 设置莫名其妙变了 | `snap-config.json` 是共享的单份配置，别的设备/标签页写入过；按第 3 节备份恢复。 |
 | 跨盘用例做不了 | 环境只有一个存储池；在记录里标为「跳过（无第二存储池）」，不要在同盘硬凑。 |
 | 「删除这个空文件夹」按钮一直不出现 | 目录里还有**任何**条目（含子目录、`txt`、隐藏文件）都不会出现；用 `PROPFIND` 复核磁盘真实状态。 |

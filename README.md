@@ -6,8 +6,10 @@
 >
 > | 实现 | 入口 | 形态 |
 > | --- | --- | --- |
-> | **桌面版**（下文） | `index.html` + `app.js` + `style.css` + `server.js` | 依赖浏览器 File System Access API，操作本机/映射盘上的文件夹 |
-> | **手机版** | `public/index.html`（单文件、零依赖） | 手机浏览器直接操作局域网 NAS 上的文件；页面与 NAS 的 WebDAV 同源，用 `PROPFIND/MOVE/COPY/DELETE` 干活，配置存在 NAS 上同目录的 `snap-config.json` |
+> | **桌面版**（下文） | [`webapp/`](webapp/)：`index.html` + `app.js` + `style.css` + `server.js` | 依赖浏览器 File System Access API，操作本机/映射盘上的文件夹 |
+> | **手机版** | [`mobile/index.html`](mobile/index.html)（单文件、零依赖） | 手机浏览器直接操作局域网 NAS 上的文件；页面与 NAS 的 WebDAV 同源，用 `PROPFIND/MOVE/COPY/DELETE` 干活，配置存在 NAS 上同目录的 `snap-config.json` |
+>
+> 两套实现**互相独立、不共享任何代码**：桌面版全部在 `webapp/` 下，手机版就是 `mobile/index.html` 这一个文件（详见[仓库结构](#仓库结构)）。
 >
 > 手机版的**设计说明**见 [`design/DESIGN.md`](design/DESIGN.md)，**测试用例**见 [`tests/TEST-CASES.md`](tests/TEST-CASES.md)（怎么跑见 [`tests/README.md`](tests/README.md)），部署脚本为 [`tools/deploy-webdav.sh`](tools/deploy-webdav.sh)。
 
@@ -16,15 +18,15 @@
 - **Chrome / Edge**（需要 File System Access API，用于真正移动文件）
 - 无需安装任何依赖，无后端
 
-> 为什么必须走 localhost：浏览器的 `showDirectoryPicker` / 文件夹写入 API 只在安全上下文（`https` 或 `http://localhost`）下可用，直接双击 `index.html`（`file://`）无法移动文件。
+> 为什么必须走 localhost：浏览器的 `showDirectoryPicker` / 文件夹写入 API 只在安全上下文（`https` 或 `http://localhost`）下可用，直接双击 `webapp/index.html`（`file://`）无法移动文件。
 
 ## 启动
 
 ```bash
-node server.js
+node webapp/server.js
 ```
 
-浏览器打开 **http://localhost:8000**（默认端口，可用 `PORT=8080 node server.js` 修改）。也可用 `python3 -m http.server 8000`。
+浏览器打开 **http://localhost:8000**（默认端口，可用 `PORT=8080 node webapp/server.js` 修改）。也可用 `cd webapp && python3 -m http.server 8000`。
 
 ## 使用步骤
 
@@ -78,11 +80,29 @@ node server.js
 - 目标文件夹若存在同名文件，会自动重命名为 `原名 (1).ext` 避免覆盖。
 - 撤销（`Ctrl+Z`）会把最近一次移动的文件移回原文件夹。
 
-## 文件结构
+## 仓库结构
+
+仓库按**实现**分目录，桌面版与手机版各占一个，互不引用：
 
 ```
-index.html   页面结构
-style.css    样式（深色主题、80%/20% 布局、卡牌竖条删除）
-app.js       核心逻辑（拖放、目录读写、预览、键盘/鼠标操作、IndexedDB 持久化）
-server.js    极简本地静态服务器（无依赖）
+webapp/                 桌面版（就是本 README 讲的这套）
+  index.html            页面结构
+  style.css             样式（深色主题、80%/20% 布局、卡牌竖条删除）
+  app.js                核心逻辑（拖放、目录读写、预览、键盘/鼠标操作、IndexedDB 持久化）
+  server.js             极简本地静态服务器（无依赖）
+
+mobile/
+  index.html            手机版：单文件、零依赖，直连 NAS 的 WebDAV
+
+design/
+  DESIGN.md             手机版设计文档（由实现反推）
+
+tests/
+  TEST-CASES.md         手机版手工测试用例集（122 条）
+  README.md             用例怎么跑：环境准备、执行顺序、收尾清理
+
+tools/
+  deploy-webdav.sh      手机版部署脚本（把 mobile/index.html PUT 到 NAS 的 WebDAV）
 ```
+
+手机版在 NAS 上的落点是一个专用目录（下文示例统一写作 `/pool-a/snap-archive-app/`）：应用页 `index.html` 与自动生成的 `snap-config.json` 都在这一层，配套测试语料放在它的 `test/` 子目录里。
