@@ -73,7 +73,10 @@ sh -c "node /volume1/docker/snap-archive/server.mjs & exec dsh web"
 ```
 
 **B. 有 entrypoint 脚本** —— 在脚本里 `nohup node /volume1/docker/snap-archive/server.mjs >/tmp/snap.log 2>&1 &`，
-再接原来的 `exec`。
+再接原来的 `exec`。放在 `exec` 之前即可（后台进程不会因为 `exec` 替换 shell 而消失）。
+
+> compose 会插值 `$`，所以脚本里的 shell 变量要写成 `$$` —— 但上面这条启动命令本身不含
+> shell 变量，原样贴进去就行。（给 `SNAP_ROOTS` 赋值时的 `;` 在引号内是安全的。）
 
 **C. 用进程管理器**（s6-overlay / supervisord）—— 加一个 program 段落，最正规。
 
