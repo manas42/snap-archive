@@ -406,7 +406,7 @@ async function handleApi(req, res, config, sub, url) {
       vols.push({ name: r.name, path: r.path, entries })
     }
     return json(res, 200, {
-      ok: true, plugin: 'snap-archive', node: process.version,
+      ok: true, service: 'snap-archive', node: process.version,
       roots: vols, configFile: configFileOf(config), ui: UI_FILE,
     })
   }
