@@ -39,7 +39,7 @@ docker/
   src/impl.mjs          ★ 全部业务：list / move / rmdir / config / media + 路径安全
   index.html            页面（由 mobile/index.html 派生，网络层换成 /api/*）
   make-test-corpus.mjs  生成测试素材（纯 Node，多格式/中文名/同名冲突/分页/假视频）
-  test-api.mjs          服务端行为测试（49 条断言，不需要浏览器）
+  test-api.mjs          服务端行为测试（56 条断言，不需要浏览器）
   test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，48 条断言）
 ```
 
@@ -148,7 +148,7 @@ SNAP_ROOTS = "photos=/data/photos;targets=/data/targets"
 | `POST` | `/api/move` | `{src, destDir, noRename?}` → `{finalName, destHref, renamed, mode}` |
 | `POST` | `/api/rmdir` | `{path}`；**只删空目录** |
 | `GET`/`PUT` | `/api/config` | 前端配置读写 |
-| `GET`/`HEAD` | `/media/<虚拟路径>` | 原图/原视频字节，支持 `Range` |
+| `GET`/`HEAD` | `/media/<虚拟路径>` | 原图/原视频字节；支持 `Range`，以及 **ETag / Last-Modified 条件请求**（命中返回 304，翻页预览不会把整张原图重下一遍） |
 | `GET` | `/` | 页面 |
 
 条目形状：`{name, dir, href, url, size, mtime, kind}` ——
@@ -193,9 +193,12 @@ SNAP_ROOTS = "photos=/data/photos;targets=/data/targets"
 ```bash
 SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
   SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
-node docker/test-api.mjs     # 服务端：49 条断言
+node docker/test-api.mjs     # 服务端：56 条断言
 node docker/test-ui.mjs      # 前端：48 条断言（需要 jsdom，见下）
 ```
+
+> 运行时兼容性：已在 **Node 22.22.2**（与容器 `node:22-bookworm` 同代）和 Node 26 上分别跑过，
+> 服务端与前端都是全绿 —— 免得等部署到 NAS 才发现版本差异。
 
 素材由两个测试**各自在开跑前重建**，所以先跑哪个都行、也不会互相污染
 （想单独造素材：`node docker/make-test-corpus.mjs`）。
@@ -205,7 +208,7 @@ node docker/test-ui.mjs      # 前端：48 条断言（需要 jsdom，见下）
 > 另外**别把 `BASE` 指向你的真实照片目录** —— 它是拿来跑一次性语料的。
 
 **服务端**（`test-api.mjs`）覆盖：中文+空格文件名、`kind` 分类、`..` 与 `..%2f` 穿越、软链逃逸、
-Range 206、同名改名不覆盖、`noRename` 冲突中止且源毫发无损、非空目录拒删、卷根拒删。
+Range 206、ETag/304 条件请求、同名改名不覆盖、`noRename` 冲突中止且源毫发无损、非空目录拒删、卷根拒删。
 
 **前端**（`test-ui.mjs`）把 `index.html` 里那份前端 JS 真的在 [jsdom](https://github.com/jsdom/jsdom)
 里跑起来，驱动真实交互流程：启动 → 列目录 → 预览渲染 → 图集分页 → 筛选切换 → 分类移动 →

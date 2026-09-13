@@ -336,7 +336,7 @@ async function writeConfig(config, obj) {
 
 /* ============================ 媒体字节 ============================ */
 
-/** 原图/原视频字节；支持 Range，否则 `<video>` 的进度条拖不动。 */
+/** 原图/原视频字节；支持 Range（否则 `<video>` 的进度条拖不动）与条件请求（304）。 */
 async function serveMedia(roots, vp, req, res) {
   const loc = await locate(roots, vp)
   if (!loc) throw badPath('没有指定文件')
@@ -344,6 +344,34 @@ async function serveMedia(roots, vp, req, res) {
   const st = await fsp.stat(real)
   if (!st.isFile()) throw fail(400, '不是文件')
   const type = MIME[extOf(real)] || 'application/octet-stream'
+
+  // 校验器：size + mtime(ms) 唯一确定"这一份"文件。
+  // ★ 必须有它：我们发的是 no-cache（每次都要向服务器确认一次），但若没有 ETag/Last-Modified，
+  //   浏览器就没有可确认的东西，只能把整份原图重下一遍 —— 手机滑动预览时这就是实打实的
+  //   流量与等待。mobile 版走 WebDAV 时靠的是 SabreDAV 的 ETag，这里是它的等价物。
+  const etag = `"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`
+  const validators = {
+    etag,
+    'last-modified': new Date(st.mtimeMs).toUTCString(),
+    'cache-control': 'no-cache',
+  }
+
+  // 条件请求命中 → 304，省掉整份文件
+  const inm = req.headers['if-none-match']
+  if (inm && inm.split(',').some((t) => { const s = t.trim(); return s === etag || s === '*' })) {
+    res.writeHead(304, validators)
+    res.end()
+    return
+  }
+  if (!inm && req.headers['if-modified-since']) {
+    const since = Date.parse(req.headers['if-modified-since'])
+    // HTTP 日期只有秒级精度：比较前把 mtime 截到秒，否则同一秒内的文件会被永远判为"已修改"
+    if (Number.isFinite(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
+      res.writeHead(304, validators)
+      res.end()
+      return
+    }
+  }
 
   const range = req.headers.range
   const m = range ? /^bytes=(\d*)-(\d*)$/.exec(String(range).trim()) : null
@@ -358,11 +386,11 @@ async function serveMedia(roots, vp, req, res) {
       return
     }
     res.writeHead(206, {
+      ...validators,
       'content-type': type,
       'content-length': end - start + 1,
       'content-range': `bytes ${start}-${end}/${st.size}`,
       'accept-ranges': 'bytes',
-      'cache-control': 'no-cache',
     })
     if (req.method === 'HEAD') { res.end(); return }
     fs.createReadStream(real, { start, end }).pipe(res)
@@ -370,11 +398,10 @@ async function serveMedia(roots, vp, req, res) {
   }
 
   res.writeHead(200, {
+    ...validators,
     'content-type': type,
     'content-length': st.size,
     'accept-ranges': 'bytes',
-    // 与原版一致：图集与预览必须共用同一个 URL，靠浏览器校验复用缓存
-    'cache-control': 'no-cache',
   })
   if (req.method === 'HEAD') { res.end(); return }
   fs.createReadStream(real).pipe(res)

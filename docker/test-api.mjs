@@ -144,6 +144,33 @@ console.log('\n— 媒体字节与 Range —')
 }
 ok((await fetch(`${BASE}/media/photos/不存在.png`)).status === 404, '媒体不存在返回 404')
 
+console.log('\n— 条件请求（原图不必重下）—')
+{
+  const first = await fetch(`${BASE}/media/photos/img00.png`)
+  const etag = first.headers.get('etag')
+  const lastMod = first.headers.get('last-modified')
+  ok(!!etag, '媒体响应带 ETag（没有它浏览器只能每次把整张原图重下）', etag)
+  ok(!!lastMod, '媒体响应带 Last-Modified', lastMod)
+  await first.arrayBuffer()
+
+  const second = await fetch(`${BASE}/media/photos/img00.png`, { headers: { 'if-none-match': etag } })
+  const body2 = Buffer.from(await second.arrayBuffer())
+  ok(second.status === 304, '带 If-None-Match 再请求 → 304', second.status)
+  ok(body2.length === 0, '304 不带响应体')
+
+  const third = await fetch(`${BASE}/media/photos/img00.png`, { headers: { 'if-modified-since': lastMod } })
+  ok(third.status === 304, '带 If-Modified-Since 再请求 → 304', third.status)
+  await third.arrayBuffer()
+
+  const r206 = await fetch(`${BASE}/media/photos/img00.png`, { headers: { range: 'bytes=0-9' } })
+  ok(r206.status === 206 && r206.headers.get('etag') === etag, 'Range 响应同样带 ETag', r206.headers.get('etag'))
+  await r206.arrayBuffer()
+
+  const wrong = await fetch(`${BASE}/media/photos/img00.png`, { headers: { 'if-none-match': '"deadbeef"' } })
+  ok(wrong.status === 200, '校验器不匹配时照常返回 200', wrong.status)
+  await wrong.arrayBuffer()
+}
+
 console.log('\n— 移动：同名绝不覆盖 —')
 {
   // 撤销语义：目标已有同名 + noRename → 必须冲突中止（等价于原 WebDAV 的 412），且源毫发无损
