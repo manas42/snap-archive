@@ -466,7 +466,7 @@ async function place(srcHref, srcName, srcSize, destDir, noRename) {
   return body;                               // { finalName, destHref, renamed, mode }
 }
 
-/* ---------------- 配置：存在 NAS 上 ---------------- */
+/* ---------------- 配置：存在服务端 ---------------- */
 function snapshot() {
   return {
     version: 1, source: S.source, targets: S.targets, del: S.del,
@@ -542,10 +542,10 @@ async function saveConfig() {
       body: JSON.stringify(snapshot(), null, 2) });
     if (!(r.status>=200 && r.status<300)) throw new Error('HTTP ' + r.status);
     S.dirty = false;
-    setSync('ok', '已存到 NAS');
+    setSync('ok', '已存到服务端');
     try { localStorage.setItem(CFG_LS, JSON.stringify(snapshot())); } catch(e){}
   } catch (e) {
-    setSync('err', '配置没能保存到 NAS：' + e.message + '（下次打开可能丢失）');
+    setSync('err', '配置没能保存到服务端：' + e.message + '（下次打开可能丢失）');
   } finally { S.saving = false; }
 }
 
@@ -587,8 +587,8 @@ function buildFiles() {
 }
 
 /** 按修改时间排序（桌面版同款：新→旧 / 旧→新）
- *  注意 WebDAV 的 getlastmodified 只有秒级精度，同一秒的连拍照片会打平 ——
- *  所以时间相同时按文件名自然序稳定兜底（桌面版也是这个规则） */
+ *  服务端给的是毫秒级 mtime；仍保留"时间相同则按文件名自然序"的稳定兜底
+ *  （同一毫秒仍可能打平，规则与桌面版一致） */
 function sortRaw() {
   const dir = S.sortMode === 'mtime-asc' ? 1 : -1;
   S.raw.sort((a, b) => (a.mtime - b.mtime) * dir
@@ -683,7 +683,7 @@ function setFilter(f) {
   S.filter = f;
   try { localStorage.setItem(FILTER_LS, f); } catch(e){}
   showList(true);                       // ★ 切换后回到列表第 1 个
-  scheduleSave();                       // 顺手存进 NAS 上的配置
+  scheduleSave();                       // 顺手存进服务端配置
   toast('媒体类型：' + ({all:'图片 + 视频', image:'仅图片', video:'仅视频'}[f])
     + (S.files.length ? `（${S.files.length} 个）` : '（没有）'), 'ok', 1400);
 }
@@ -940,7 +940,7 @@ async function classify(target, slotEl) {
     const res = await place(f.href, f.name, f.size, destDir);
     S.undoStack.push({ backDir: S.cwd, name: res.finalName, from: res.destHref, mode: res.mode });
     if (S.undoStack.length > MAX_UNDO) S.undoStack.shift();
-    scheduleSave();                         // 撤销栈也存进 NAS，刷新/换设备后仍可撤销
+    scheduleSave();                         // 撤销栈也存进服务端，刷新/换设备后仍可撤销
     if (S.counts[target.path] != null) S.counts[target.path] += 1;
     if (navigator.vibrate) navigator.vibrate(12);
     const renamed = res.finalName !== f.name;
@@ -1195,10 +1195,10 @@ function renderSetup() {
   }
 
   $('setupNote').innerHTML =
-    `· 目标可以是<b>同一块盘上的任意目录</b>（跨目录正常）；与源不同盘的槽位会标 ⚠，那种情况会改用「复制+校验+删除」<br>`
-  + `· 配置会<b>保存到 NAS 上本页旁边的 snap-config.json</b>，换设备/换浏览器/清缓存都能沿用<br>`
+    `· 目标可以是<b>任意卷里的任意目录</b>（跨目录正常）；目标已有同名文件时会自动改名，绝不覆盖<br>`
+  + `· 配置由本服务持久化（<code>/api/config</code>），换设备/换浏览器/清缓存都能沿用<br>`
   + `· 长按或右键槽位也能快速改；「☑ 批量勾选子目录」可以一次挑多个<br>`
-  + `· 当前源在存储池 <b>${esc(srcPool || '—')}</b>`;
+  + `· 当前源：<b>${esc(S.source ? S.source.path : '未选择')}</b>`;
 }
 
 /* ---------------- 槽位顺序调整 / 源与目标互换 ---------------- */
@@ -1445,7 +1445,7 @@ function commitPick(path) {
   renderSetup(); renderSlots();
   if (m === 'source') { S.index = 0; openSource(path); }
   refreshCounts();
-  toast('已设置（正在保存到 NAS…）', 'ok', 1600);
+  toast('已设置（正在保存…）', 'ok', 1600);
 }
 
 function applyBatch() {
@@ -1581,7 +1581,7 @@ document.addEventListener('keydown', (e) => {
 
 /* ---------------- 启动 ---------------- */
 (async function boot() {
-  // 先用浏览器缓存（配置 + 媒体类型）瞬间渲染，再以 NAS 上的配置为准
+  // 先用浏览器缓存（配置 + 媒体类型）瞬间渲染，再以服务端的配置为准
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
   try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
   try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}

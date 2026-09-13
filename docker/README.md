@@ -40,7 +40,7 @@ docker/
   index.html            页面（由 mobile/index.html 派生，网络层换成 /api/*）
   make-test-corpus.mjs  生成测试素材（纯 Node，多格式/中文名/同名冲突/分页/假视频）
   test-api.mjs          服务端行为测试（56 条断言，不需要浏览器）
-  test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，48 条断言）
+  test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，74 条断言）
 ```
 
 ## 部署
@@ -194,7 +194,7 @@ SNAP_ROOTS = "photos=/data/photos;targets=/data/targets"
 SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
   SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
 node docker/test-api.mjs     # 服务端：56 条断言
-node docker/test-ui.mjs      # 前端：48 条断言（需要 jsdom，见下）
+node docker/test-ui.mjs      # 前端：74 条断言（需要 jsdom，见下）
 ```
 
 > 运行时兼容性：已在 **Node 22.22.2**（与容器 `node:22-bookworm` 同代）和 Node 26 上分别跑过，
@@ -211,8 +211,13 @@ node docker/test-ui.mjs      # 前端：48 条断言（需要 jsdom，见下）
 Range 206、ETag/304 条件请求、同名改名不覆盖、`noRename` 冲突中止且源毫发无损、非空目录拒删、卷根拒删。
 
 **前端**（`test-ui.mjs`）把 `index.html` 里那份前端 JS 真的在 [jsdom](https://github.com/jsdom/jsdom)
-里跑起来，驱动真实交互流程：启动 → 列目录 → 预览渲染 → 图集分页 → 筛选切换 → 分类移动 →
-同名改名 → 撤销 → 切目录 → 删空目录 → 配置持久化，并断言全程没有未捕获异常。
+里跑起来，驱动真实交互流程：启动 → 列目录 → 预览渲染 → 图集分页/点选 → 筛选切换 → 分类移动 →
+同名改名 → 撤销 → 切目录 → 删空目录 → 配置持久化 → **设置面板 → 目录选择器 → 批量勾选 →
+排序切换 → 槽位/源互换 → 开关与全屏 → 方向键与数字键分类**，并断言全程没有未捕获异常。
+其中还专门断言了"面板打开时键盘必须失效"这条安全设计。
+
+> 为什么要连冷门路径一起覆盖：设置面板曾经引用了一个重构中被删掉的变量（`srcPool`），
+> **一打开就抛错** —— 而只跑主流程的测试完全看不见它。同理，启动路径上的 `DIR` 也是这么躲过检查的。
 
 > 这一类测试抓得到 API 测试与 `node --check` 都抓不到的 bug —— 例如"启动时引用了重构中被删掉的
 > 标识符"，语法完全合法、接口全部正常，但页面一打开就是白的。
