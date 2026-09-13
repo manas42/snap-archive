@@ -416,6 +416,12 @@
         <button class="btn" id="autoplayBtn">开</button>
       </div>
 
+      <div class="grp" style="margin-top:14px">反馈</div>
+      <div class="item">
+        <span class="txt"><b>震动反馈</b><span>点槽位/丢弃把图片移进目标目录时震一下（20ms）。只有 Android Chrome 支持 Vibration API；iPhone 上这个开关不起作用，届时以槽位闪光为准。</span></span>
+        <button class="btn" id="hapticBtn">开</button>
+      </div>
+
       <div class="grp" style="margin-top:14px">全屏</div>
       <div class="item">
         <span class="txt"><b>自动全屏</b><span>打开页面后第一次点按即进入全屏（隐藏浏览器地址栏）。手动退出全屏会自动关掉这个开关。</span></span>
@@ -582,6 +588,7 @@ const FILTER_LS = 'snap.filter';
 const AUTOPLAY_LS = 'snap.autoplay';
 const AUTOFS_LS = 'snap.autofs';
 const SORT_LS = 'snap.sort';
+const HAPTIC_LS = 'snap.haptics';               // 震动反馈开关（默认开）
 const $ = (id) => document.getElementById(id);
 const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
 const VID = new Set(['mp4','webm']);
@@ -602,6 +609,7 @@ const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() ||
 
 const S = {
   cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true, autoFs: false,
+  haptics: true,
   sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null, swapMode: null, swapFirst: -1,
   entryCount: 0, otherNames: [],
   source: null, targets: new Array(SLOT_N).fill(null), del: null,
@@ -729,7 +737,7 @@ async function place(srcHref, srcName, srcSize, destDir, noRename) {
 function snapshot() {
   return {
     version: 1, source: S.source, targets: S.targets, del: S.del,
-    filter: S.filter, autoplay: S.autoplay, autoFs: S.autoFs, sort: S.sortMode,
+    filter: S.filter, autoplay: S.autoplay, autoFs: S.autoFs, haptics: S.haptics, sort: S.sortMode,
     // 「浏览」页的选择也一起存（同一份配置，换设备/清缓存都还能接着看）
     browse: {
       dirs: B.dirs.map((d) => d.path),
@@ -756,6 +764,7 @@ function applyConfig(c) {
   if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
   if (typeof c.autoplay === 'boolean') S.autoplay = c.autoplay;
   if (typeof c.autoFs === 'boolean') S.autoFs = c.autoFs;
+  if (typeof c.haptics === 'boolean') S.haptics = c.haptics;
   if (c.sort === 'mtime-asc' || c.sort === 'mtime-desc') S.sortMode = c.sort;
   if (c.browse && typeof c.browse === 'object') {
     const bs = c.browse;
@@ -1034,6 +1043,23 @@ function setAutoFs(v) {
   updateFsUI(); scheduleSave(); armAutoFs();
   toast('自动全屏：' + (S.autoFs ? '开（下次点按生效）' : '关'), 'ok', 1800);
 }
+
+/* 震动反馈开关：只影响"点槽位/丢弃"这类触觉提示，不影响分类逻辑本身。
+   iOS 没有 Vibration API，那里开关照样能切，只是震不动 —— 所以在说明里写清楚。 */
+function updateHapticUI() {
+  const b = $('hapticBtn');
+  if (!b) return;
+  b.textContent = S.haptics ? '开' : '关';
+  b.style.borderColor = S.haptics ? 'var(--ok)' : 'var(--line)';
+  b.style.color = S.haptics ? 'var(--ok)' : 'var(--dim)';
+}
+function setHaptics(v) {
+  S.haptics = !!v;
+  try { localStorage.setItem(HAPTIC_LS, S.haptics ? '1' : '0'); } catch(e){}
+  updateHapticUI(); scheduleSave();
+  if (S.haptics) haptic(HAPTIC_TAP);              // 打开时当场震一下，让用户确认手感
+  toast('震动反馈：' + (S.haptics ? '开' : '关'), 'ok', 1400);
+}
 /** 自动全屏必须由用户手势触发，所以"进入页面后的第一次点按/按键"才是时机 */
 let fsArmed = false;
 function armAutoFs() {
@@ -1211,7 +1237,12 @@ function buildSlots() {
     b.className = 'slot empty';
     b.dataset.slot = String(i);
     b.innerHTML = `<span class="k">${i+1}</span><span class="n"></span><span class="c"></span>`;
-    b.onclick = () => { const t = S.targets[i]; t ? classify(t, b) : openPicker('slot', i); };
+    b.onclick = () => {
+      const t = S.targets[i];
+      if (!t) { openPicker('slot', i); return; }
+      haptic(HAPTIC_TAP);           // 必须在这里同步震：进了 classify 之后就是 await，激活会过期
+      classify(t, b);
+    };
     b.oncontextmenu = (e) => { e.preventDefault(); openPicker('slot', i); };
     box.append(b);
     slotEls.push(b);
@@ -1246,6 +1277,19 @@ function updateSlotsFade() {
 }
 
 /* ---------------- 分类 ---------------- */
+/** 触觉反馈：**必须同步调用**，也就是只能在点击回调里直接调，不能在 await 之后调。
+ *  原因：W3C 规范与 Chrome 都要求 navigator.vibrate() 具备"瞬时用户激活"，
+ *  一次 fetch 往返之后激活可能已经过期 → Chrome 静默忽略（历史上就是这个问题：
+ *  震动的调用挂在 `await place()` 之后，于是"震动没了"）。
+ *  12ms 也太短（很多机器的振动器最小可感时长约 20–50ms），所以这里用 20ms。
+ *  iOS Safari 没有 Vibration API，那种情况下静默跳过（视觉上仍有槽位闪光）。 */
+const HAPTIC_TAP = 20;          // 点槽位/丢弃/数字键：立刻回一下
+const HAPTIC_UNDO = 12;         // 撤销：反馈轻一点，别和"移走"混淆
+function haptic(ms) {
+  if (!S.haptics) return;
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 不支持就算了 */ }
+}
+
 async function classify(target, slotEl) {
   if (S.busy) return;
   const f = S.files[S.index];
@@ -1258,7 +1302,6 @@ async function classify(target, slotEl) {
     if (S.undoStack.length > MAX_UNDO) S.undoStack.shift();
     scheduleSave();                         // 撤销栈也存进服务端，刷新/换设备后仍可撤销
     if (S.counts[target.path] != null) S.counts[target.path] += 1;
-    if (navigator.vibrate) navigator.vibrate(12);
     const renamed = res.finalName !== f.name;
     toast(`已移到「${target.name}」${renamed ? '，改名为 ' + res.finalName : ''}`, 'ok', 1800);
     S.files.splice(S.index, 1);
@@ -1426,6 +1469,7 @@ function openSetup() {
   renderSetup();
   updateAutoplayUI();
   updateFsUI();
+  updateHapticUI();
   $('setupSheet').classList.add('on');
   refreshCounts();
 }
@@ -2288,11 +2332,13 @@ $('srcBtn').onclick = () => openPicker('source', -1);
 $('filterChip').onclick = () => setFilter(S.filter === 'all' ? 'image' : S.filter === 'image' ? 'video' : 'all');
 ['all','image','video'].forEach((k) => { const b = $('filter_' + k); if (b) b.onclick = () => setFilter(k); });
 $('autoplayBtn').onclick = () => setAutoplay(!S.autoplay);
+$('hapticBtn').onclick = () => setHaptics(!S.haptics);
 $('fsBtn').onclick = toggleFullscreen;
 $('autofsBtn').onclick = () => setAutoFs(!S.autoFs);
-$('undo').onclick = undo;
+$('undo').onclick = () => { haptic(HAPTIC_UNDO); undo(); };
 $('discard').onclick = () => {
   if (!S.del) { toast('还没设置「丢弃」目录，去 ⚙ 设置里选一个', 'warn'); openSetup(); return; }
+  haptic(HAPTIC_TAP);               // 同上：同步震，别等 await
   classify(S.del, null);
 };
 $('setup').onclick = openSetup;
@@ -2399,7 +2445,10 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }   // metaKey 兼顾 macOS
   if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); if (S.index < S.files.length-1) { S.index++; renderStage(); renderFilm(); preload(); } }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); if (S.index > 0) { S.index--; renderStage(); renderFilm(); preload(); } }
-  else if (/^[1-9]$/.test(e.key)) { const t = S.targets[Number(e.key)-1]; if (t) classify(t, document.querySelector(`.slot[data-slot="${Number(e.key)-1}"]`)); }
+  else if (/^[1-9]$/.test(e.key)) {
+    const t = S.targets[Number(e.key)-1];
+    if (t) { haptic(HAPTIC_TAP); classify(t, document.querySelector(`.slot[data-slot="${Number(e.key)-1}"]`)); }
+  }
 });
 
 /* ---------------- 启动 ---------------- */
@@ -2410,12 +2459,14 @@ document.addEventListener('keydown', (e) => {
   try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}
   B.videoAuto = S.autoplay;     // 浏览页的视频自动播放与它同源（服务端配置随后说了算）
   try { if (localStorage.getItem(AUTOFS_LS) === '1') S.autoFs = true; } catch(e){}
+  try { if (localStorage.getItem(HAPTIC_LS) === '0') S.haptics = false; } catch(e){}
   try { const ls = localStorage.getItem(SORT_LS); if (ls) S.sortMode = ls; } catch(e){}
   buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
   updateFilterUI();
   updateAutoplayUI();
   updateSortUI();
   updateFsUI();
+  updateHapticUI();
   updateBrowseChip();
   updateSlideUI();
   updateBrowseCfgUI();

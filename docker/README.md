@@ -41,7 +41,7 @@ docker/
   make-test-corpus.mjs  生成测试素材（纯 Node，多格式/中文名/同名冲突/分页/假视频）
   lint.mjs              静态接线检查（no-undef）：拦住"引用了不存在的标识符"这类漏改
   test-api.mjs          服务端行为测试（56 条断言，不需要浏览器）
-  test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，105 条断言）
+  test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，113 条断言）
 ```
 
 ## 部署
@@ -262,7 +262,7 @@ SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
   SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
 node docker/lint.mjs         # 静态接线检查（不需要服务在跑，秒级）
 node docker/test-api.mjs     # 服务端：56 条断言
-node docker/test-ui.mjs      # 前端：105 条断言（需要 jsdom，见下）
+node docker/test-ui.mjs      # 前端：113 条断言（需要 jsdom，见下）
 ```
 
 > **改完前端先跑 `node docker/lint.mjs`**：它不需要运行任何东西，就能发现"引用了不存在的

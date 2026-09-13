@@ -100,6 +100,7 @@ const tail = `
   openPicker, pickerLoad, commitPick, toggleChosen, applyBatch, setSort, openSetup, renderSetup,
   doSwapSlots, doSwapSourceWithSlot, gridStep, setAutoplay, toggleFullscreen, setAutoFs,
   setSource, setTarget, setDel, refreshCounts, conflictWith, updateSortUI,
+  haptic, setHaptics, HAPTIC_TAP, HAPTIC_UNDO,
   // 本次新增：页面切换 / 浏览页设置 / 幻灯片 / 详情药丸
   showPage, pageFromHash, setAutoSlide, setRandom, setVideoLoop, updateBrowseCfgUI,
   updateSlideUI, browseLoad, browseBuild, nextIndex, browseNext, browseGoto, renderBrowse,
@@ -114,6 +115,7 @@ await fetch(BASE + '/api/config', {
 }).catch(() => {})
 
 const jsdomErrors = []
+const vibrateCalls = []      // navigator.vibrate(ms) 的调用记录（毫秒）
 const dom = new JSDOM(patched, {
   url: BASE + '/',
   runScripts: 'dangerously',
@@ -126,7 +128,7 @@ const dom = new JSDOM(patched, {
     }
     window.confirm = () => true                 // jsdom 未实现 confirm：不 stub 的话删目录会被静默取消
     window.alert = () => {}
-    window.navigator.vibrate = () => {}
+    window.navigator.vibrate = (ms) => { vibrateCalls.push(ms); return true }   // 记录震动调用，供断言
     window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
     window.Element.prototype.scrollIntoView = () => {}
     window.HTMLMediaElement.prototype.play = () => Promise.resolve()
@@ -379,6 +381,46 @@ console.log('\n— 设置面板 / 选择器 / 排序 / 互换 / 键盘（这些�
   await app.undo()
   ok(await exists(path.join(SRC_DIR, victim.name)), '撤销把它放回源目录')
   ok(jsdomErrors.length === 0, '键盘路径全程没有未捕获错误', jsdomErrors.slice(0, 2))
+}
+
+console.log('\n— 分类时的震动反馈（关键是"必须在 await 之前同步震"）—')
+{
+  onCategorize()
+  for (let i = 0; i < S.targets.length; i++) S.targets[i] = null
+  S.targets[0] = { path: '/store/目标A/', name: '目标A' }
+  await app.openSource('/photos/', true)
+  await until(() => S.cwd === '/photos/' && S.files.length > 0, '归类页列表就绪')
+  S.index = 0
+
+  const victimName = S.files[0].name
+  vibrateCalls.length = 0
+  window.document.getElementById('slots').children[0].click()
+  // ★ 这一条是这次 bug 的核心：震动必须在 await 之前就发生，不能等 fetch 回来。
+  //   断言放在还没 await 任何东西的此刻 —— 所以它同时验证了"同步"和"发出去了"。
+  ok(vibrateCalls.length === 1, '点槽位立刻震了一下（没有等到 await 回来）', vibrateCalls.slice())
+  ok(vibrateCalls[0] >= 20, '震动时长够长（≥20ms，12ms 在很多机器上低于可感阈值）', vibrateCalls[0])
+  await until(() => !S.busy && !S.files.some((f) => f.name === victimName), '文件已被移走')
+  ok(await exists(path.join(ROOT, '目标A', victimName)), '震动的同时文件真的进了目标目录', victimName)
+
+  vibrateCalls.length = 0
+  window.document.getElementById('undo').click()
+  ok(vibrateCalls.length === 1, '撤销也给了触觉反馈', vibrateCalls.slice())
+  await until(() => !S.busy && S.files.some((f) => f.name === victimName), '撤销把文件放回来')
+
+  app.setHaptics(false)
+  ok(S.haptics === false, '震动反馈可关闭')
+  S.index = 0
+  const victim2 = S.files[0].name
+  vibrateCalls.length = 0
+  window.document.getElementById('slots').children[0].click()
+  ok(vibrateCalls.length === 0, '关掉之后点槽位不再震动', vibrateCalls.slice())
+  await until(() => !S.busy && !S.files.some((f) => f.name === victim2), '（关震动不影响分类本身）文件照样移走')
+  app.setHaptics(true)
+  ok(vibrateCalls.length === 1, '重新打开时当场震一下确认手感', vibrateCalls.slice())
+  vibrateCalls.length = 0          // 清空，别把它算到后面的断言里
+  await app.undo()
+  await until(() => !S.busy && S.files.some((f) => f.name === victim2), '文件回到源目录')
+  ok(jsdomErrors.length === 0, '震动路径没有未捕获错误', jsdomErrors.slice(0, 2))
 }
 
 console.log('\n— 左上角序号药丸：默认只有序号，点开才显示类型/大小 —')
