@@ -2,16 +2,18 @@
 
 纯本地、无后端、键盘 + 鼠标驱动的图片人工分类器。把「待分类」文件夹拖进左边画布，把最多 20 个「分类目标」文件夹拖进右侧（外加 1 个固定 `Del` 槽位），然后一路快速归类。
 
-> **本仓库有两套实现，本 README 讲的是桌面版**
+> **本仓库有三套实现，本 README 讲的是桌面版**
 >
 > | 实现 | 入口 | 形态 |
 > | --- | --- | --- |
 > | **桌面版**（下文） | [`webapp/`](webapp/)：`index.html` + `app.js` + `style.css` + `server.js` | 依赖浏览器 File System Access API，操作本机/映射盘上的文件夹 |
 > | **手机版** | [`mobile/index.html`](mobile/index.html)（单文件、零依赖） | 手机浏览器直接操作局域网 NAS 上的文件；页面与 NAS 的 WebDAV 同源，用 `PROPFIND/MOVE/COPY/DELETE` 干活，配置存在 NAS 上同目录的 `snap-config.json` |
+> | **Docker 版** | [`docker/`](docker/)：`server.mjs` + `src/impl.mjs` + `index.html` | 在 NAS 已有的 DSH **容器内**跑一个独立 node 服务，直接读写容器里**已挂载的照片卷**；交互与手机版完全一致，零依赖，不碰 DSH 自身 |
 >
-> 两套实现**互相独立、不共享任何代码**：桌面版全部在 `webapp/` 下，手机版就是 `mobile/index.html` 这一个文件（详见[仓库结构](#仓库结构)）。
+> 三套实现**互相独立、不共享代码**：桌面版全在 `webapp/`，手机版就是 `mobile/index.html` 这一个文件，Docker 版全在 `docker/` 下（页面由手机版派生）（详见[仓库结构](#仓库结构)）。
 >
 > 手机版的**设计说明**见 [`design/DESIGN.md`](design/DESIGN.md)，**测试用例**见 [`tests/TEST-CASES.md`](tests/TEST-CASES.md)（怎么跑见 [`tests/README.md`](tests/README.md)），部署脚本为 [`tools/deploy-webdav.sh`](tools/deploy-webdav.sh)。
+> Docker 版的部署与差异说明见 [`docker/README.md`](docker/README.md)。
 
 ## 环境要求
 
@@ -93,6 +95,15 @@ webapp/                 桌面版（就是本 README 讲的这套）
 
 mobile/
   index.html            手机版：单文件、零依赖，直连 NAS 的 WebDAV
+
+docker/                 Docker 版（在已有 DSH 容器内跑独立服务，经挂载卷操作文件）
+  server.mjs            服务入口：起 http、绑 0.0.0.0:8005、按 mtime 动态加载实现
+  src/routes.mjs        路由前缀单一来源
+  src/impl.mjs          全部业务：列目录/移动/删空目录/配置/媒体字节
+  index.html            页面（由 mobile/index.html 派生，网络层换成 /api/*）
+  make-test-corpus.py   生成测试素材（多格式/中文名/同名冲突/分页/假视频）
+  test-api.mjs          服务端行为测试（49 条断言）
+  README.md             部署、配置、与手机版的差异清单
 
 design/
   DESIGN.md             手机版设计文档（由实现反推）

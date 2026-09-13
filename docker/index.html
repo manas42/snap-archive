@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0b0f14" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Snap Archive</title>
+<style>
+  :root{
+    color-scheme:dark;
+    --bg:#0b0f14; --bg-deep:#070a0e; --panel:#141b24; --panel-2:#1a2330; --panel-3:#212c3b;
+    --line:#25313f; --line-soft:#1b2531;
+    --fg:#e6edf3; --dim:#8b98a5; --dim-2:#63707e;
+    --acc:#4c9aff; --acc-dim:#1f4f8f; --ok:#3fb950; --warn:#e3b341; --bad:#f85149;
+    --r:14px; --r-sm:10px;
+    --slot-h:56px; --slot-gap:6px;          /* 槽位行高与间距：用于算"只露 3 行"的高度 */
+    --shadow:0 8px 24px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(120% 80% at 50% 0%, #101823 0%, var(--bg) 45%, var(--bg-deep) 100%);
+    color:var(--fg); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+    overscroll-behavior:none; touch-action:manipulation;
+    -webkit-user-select:none; user-select:none;
+  }
+  button{font-family:inherit;color:inherit;border:0;background:none;cursor:pointer}
+  .btn{
+    min-height:46px;padding:0 14px;border-radius:var(--r-sm);
+    background:linear-gradient(180deg,var(--panel-3),var(--panel-2));
+    border:1px solid var(--line); color:var(--fg);
+    font-size:14px;font-weight:600; letter-spacing:.2px;
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    transition:transform .08s ease, filter .15s ease, border-color .15s ease;
+  }
+  .btn:active{transform:scale(.96);filter:brightness(1.15)}
+  .btn.primary{background:linear-gradient(180deg,#2ea043,#238636);border-color:#2ea043;color:#fff}
+  .btn.ghost{background:transparent;border-color:var(--line-soft);color:var(--dim)}
+  .btn.warn{border-color:#5c4a1d;color:var(--warn)}
+  .btn:disabled{opacity:.38;transform:none;filter:none}
+  .btn.icon{min-width:46px;padding:0 10px;font-size:17px}
+
+  /* ---------- 顶栏 ---------- */
+  header{
+    flex:0 0 auto; display:flex; align-items:center; gap:8px;
+    padding:calc(8px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 8px calc(10px + env(safe-area-inset-left));
+    border-bottom:1px solid var(--line-soft);
+    background:rgba(11,15,20,.72); backdrop-filter:blur(12px);
+    position:relative; z-index:5;
+  }
+  .chip{flex:0 0 auto;min-height:44px;padding:0 10px;border-radius:var(--r-sm);
+    background:linear-gradient(180deg,var(--panel-3),var(--panel-2));border:1px solid var(--line);
+    color:var(--fg);font-size:12px;font-weight:700;white-space:nowrap;transition:transform .08s ease}
+  .chip:active{transform:scale(.94)}
+  .chip[data-f="image"],.chip[data-f="video"]{border-color:var(--acc);color:var(--acc)}
+  .seg{display:flex;gap:6px;margin-bottom:12px}
+  .seg .btn{flex:1;min-height:42px;font-size:12.5px}
+  .seg .btn.on{background:linear-gradient(180deg,#2f6fd0,#255bb0);border-color:#3b7de0;color:#fff}
+  /* 视频中央的大播放键：移动端 preload=metadata 常常只显示黑框，需要明确的点击目标 */
+  .playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+    width:76px;height:76px;border-radius:50%;font-size:28px;color:#fff;line-height:1;
+    background:rgba(10,14,20,.6);border:2px solid rgba(255,255,255,.55);
+    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);
+    transition:opacity .18s}
+  .playbtn.hidden{opacity:0;pointer-events:none}
+  .brand{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+  .brand b{font-size:14px;letter-spacing:.4px}
+  .srcbtn{
+    flex:1;min-width:0;display:flex;align-items:center;gap:8px;
+    min-height:44px;padding:0 12px;border-radius:var(--r-sm);
+    background:var(--panel);border:1px solid var(--line);text-align:left;
+  }
+  .srcbtn .ico{flex:0 0 auto;font-size:16px;opacity:.9}
+  .srcbtn .t{flex:1;min-width:0}
+  .srcbtn .t .n{display:block;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srcbtn .t .p{display:block;font-size:10.5px;color:var(--dim-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+  .hdrbtn{flex:0 0 auto;min-width:46px;min-height:44px;padding:0 8px;border-radius:var(--r-sm);
+    background:linear-gradient(180deg,var(--panel-3),var(--panel-2));border:1px solid var(--line);
+    color:var(--fg);font-size:18px;line-height:1;transition:transform .08s ease}
+  .hdrbtn:active{transform:scale(.94)}
+
+  /* ---------- 主区 ---------- */
+  main{flex:1;min-height:0;display:flex;flex-direction:column}
+  .stage{
+    flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;
+    background:
+      linear-gradient(45deg,#0a0e13 25%,transparent 25%,transparent 75%,#0a0e13 75%) 0 0/22px 22px,
+      linear-gradient(45deg,#0a0e13 25%,transparent 25%,transparent 75%,#0a0e13 75%) 11px 11px/22px 22px,
+      #0d1219;
+    overflow:hidden;
+  }
+  .stage img,.stage video{max-width:100%;max-height:100%;object-fit:contain;display:block;
+    animation:fade .22s ease}
+  @keyframes fade{from{opacity:.25;transform:scale(.995)}to{opacity:1;transform:none}}
+  .stage .hint{color:var(--dim);font-size:13px;text-align:center;padding:24px;line-height:2}
+  .stage .hint .big{font-size:34px;display:block;margin-bottom:10px;opacity:.55}
+  .spinner{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;
+    border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;
+    animation:spin .8s linear infinite;opacity:0;pointer-events:none;transition:opacity .15s}
+  .spinner.on{opacity:1}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .badge{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+  .badge span{background:rgba(7,10,14,.72);backdrop-filter:blur(6px);border:1px solid var(--line-soft);
+    border-radius:20px;padding:4px 10px;font-size:11px;color:var(--dim)}
+
+  .film{flex:0 0 auto;display:flex;gap:6px;overflow-x:auto;padding:7px 8px;border-top:1px solid var(--line-soft);
+    scrollbar-width:none}
+  .film::-webkit-scrollbar{display:none}
+  .th{flex:0 0 auto;width:62px;height:62px;border-radius:var(--r-sm);border:1px solid var(--line);
+    overflow:hidden;background:var(--panel);position:relative;padding:0}
+  .th img,.th video{width:100%;height:100%;object-fit:cover;display:block}
+  .th.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(76,154,255,.35)}
+  .th .v{position:absolute;right:3px;bottom:3px;font-size:9px;background:rgba(0,0,0,.65);
+    border-radius:4px;padding:0 3px}
+  .th.dir{display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dim);
+    width:78px;padding:2px 4px;line-height:1.2;word-break:break-all;text-align:center;
+    background:var(--panel-2)}
+
+  /* ---------- 底部槽位（20 个 = 4 列 × 5 行；默认只露 3 行，可上下滑） ---------- */
+  footer{flex:0 0 auto;border-top:1px solid var(--line-soft);background:rgba(11,15,20,.85);backdrop-filter:blur(12px);
+    padding:8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left))}
+  .slots-outer{position:relative}
+  .slots-wrap{
+    max-height:calc(3 * var(--slot-h) + 2 * var(--slot-gap));   /* 只露 3 行 */
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;                                 /* 别把滚动传给整页 */
+    scrollbar-width:thin;
+  }
+  .slots-wrap::-webkit-scrollbar{width:4px}
+  .slots-wrap::-webkit-scrollbar-thumb{background:var(--panel-3);border-radius:4px}
+  /* 底部渐隐：提示"下面还有"（滑到底自动消失） */
+  .slots-fade{position:absolute;left:0;right:4px;bottom:0;height:20px;pointer-events:none;
+    background:linear-gradient(transparent,rgba(11,15,20,.92));opacity:0;transition:opacity .18s}
+  .slots-fade.on{opacity:1}
+  .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--slot-gap)}
+  .slot{
+    position:relative;min-height:var(--slot-h);border-radius:var(--r-sm);padding:6px 6px 5px;
+    background:linear-gradient(180deg,var(--panel-2),var(--panel));
+    border:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;
+    align-items:center;gap:2px;overflow:hidden;
+    transition:transform .08s ease, border-color .15s ease, filter .12s ease;
+  }
+  .slot:active{transform:scale(.95);filter:brightness(1.2)}
+  .slot .n{font-size:12.5px;font-weight:700;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .slot .c{font-size:10px;color:var(--dim-2)}
+  .slot .k{position:absolute;top:3px;left:5px;font-size:9px;color:var(--dim-2)}
+  .slot.empty{border-style:dashed;background:transparent}
+  .slot.empty .n{color:var(--dim-2);font-weight:600}
+  .slot.xdisk{border-color:#5c4a1d}
+  .slot.xdisk .c{color:var(--warn)}
+  .slot.flash{animation:flash .55s ease}
+  @keyframes flash{
+    0%{box-shadow:0 0 0 0 rgba(63,185,80,.75);border-color:var(--ok)}
+    100%{box-shadow:0 0 0 16px rgba(63,185,80,0);border-color:var(--line)}
+  }
+  .tools{display:flex;gap:6px;margin-top:7px}
+  .tools .btn{flex:1;font-size:12px;padding:0 6px}
+  .tools .btn .cnt{font-size:10px;color:var(--acc);margin-left:3px;vertical-align:super}
+
+  /* ---------- 抽屉 / 弹层 ---------- */
+  .sheet{position:fixed;inset:0;z-index:30;display:none;background:rgba(4,7,11,.72);backdrop-filter:blur(4px);
+    padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))}
+  .sheet.on{display:flex;flex-direction:column;animation:up .2s ease}
+  @keyframes up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .card{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel);
+    border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+  .card > h2{margin:0;padding:14px 16px;font-size:15px;display:flex;align-items:center;gap:10px;
+    border-bottom:1px solid var(--line-soft)}
+  .card > h2 .sp{flex:1}
+  .card .body{flex:1;min-height:0;overflow-y:auto;padding:12px 14px;-webkit-overflow-scrolling:touch}
+  .card .foot{flex:0 0 auto;display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line-soft)}
+  .card .foot .btn{flex:1}
+  .grp{font-size:11px;color:var(--dim-2);letter-spacing:.6px;margin:4px 0 8px;text-transform:uppercase}
+  .item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+  .item:last-child{border-bottom:0}
+  .item .idx{flex:0 0 30px;font-size:11px;color:var(--dim-2);text-align:center}
+  .item .txt{flex:1;min-width:0}
+  .item .txt b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .txt span{display:block;font-size:10.5px;color:var(--dim-2);word-break:break-all}
+  .item .acts{flex:0 0 auto;display:flex;gap:5px}
+  .item .acts .btn{min-height:34px;padding:0 9px;font-size:11.5px}
+  /* 左侧勾选框：够大好点，且只有点它才是"选中"（点行的其它地方＝进入目录） */
+  .item .ck{flex:0 0 42px;width:42px;height:42px;margin-right:2px;border-radius:10px;
+    border:1.5px solid var(--line);background:var(--panel-2);
+    display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;
+    color:transparent;transition:transform .08s ease,background .15s ease}
+  .item .ck:active{transform:scale(.9)}
+  .item .ck.on{background:var(--acc);border-color:var(--acc);color:#04121f}
+  .item .chev{flex:0 0 auto;color:var(--dim-2);font-size:22px;line-height:1;padding:0 6px}
+  .picker{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+  .picker .ico{flex:0 0 auto;font-size:17px}
+  .picker .txt{flex:1;min-width:0}
+  .picker .txt b{font-size:13px}
+  .picker .txt span{display:block;font-size:10.5px;color:var(--dim-2);word-break:break-all}
+  .bar{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+  .crumb{flex:1;min-width:0;font-size:11px;color:var(--dim);background:var(--panel-2);border:1px solid var(--line-soft);
+    border-radius:var(--r-sm);padding:8px 10px;word-break:break-all;line-height:1.5}
+  .pool{display:inline-block;font-size:10px;padding:1px 6px;border-radius:20px;border:1px solid var(--line);margin-left:4px}
+  .pool.same{color:var(--ok);border-color:#1d3d24} .pool.diff{color:var(--warn);border-color:#5c4a1d}
+  .toast{position:fixed;left:50%;transform:translateX(-50%) translateY(10px);
+    bottom:calc(18px + env(safe-area-inset-bottom));z-index:60;
+    background:rgba(26,35,48,.97);border:1px solid var(--line);border-radius:12px;
+    padding:11px 16px;font-size:13px;max-width:90vw;box-shadow:var(--shadow);
+    opacity:0;pointer-events:none;transition:opacity .16s,transform .16s}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:#1d5c2a} .toast.err{border-color:#6e2b28;color:#ffb4ae} .toast.warn{border-color:#5c4a1d;color:#f0d089}
+  .note{font-size:11.5px;color:var(--dim-2);line-height:1.9;padding:12px 2px 4px}
+  .note b{color:var(--dim)}
+  /* 图集：4 列 × 5 行 = 每页 20 张 */
+  .gbar{display:flex;gap:6px;align-items:center;margin-bottom:10px}
+  .gbar .sp{flex:1}
+  .gbar .btn{min-height:38px;font-size:12px;padding:0 10px}
+  .gbar .btn.on{background:linear-gradient(180deg,#2f6fd0,#255bb0);border-color:#3b7de0;color:#fff}
+  .pag{font-size:12px;color:var(--dim);white-space:nowrap}
+  .ggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .gcell{position:relative;aspect-ratio:1;border-radius:10px;border:1px solid var(--line);
+    overflow:hidden;background:var(--panel-2);padding:0}
+  .gcell img,.gcell video{width:100%;height:100%;object-fit:cover;display:block}
+  .gcell.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(76,154,255,.5)}
+  .gcell .v{position:absolute;right:3px;bottom:3px;font-size:10px;background:rgba(0,0,0,.65);border-radius:4px;padding:0 3px}
+  .gcell .d{position:absolute;left:3px;top:3px;font-size:9px;background:rgba(0,0,0,.6);border-radius:4px;padding:0 4px;color:var(--dim)}
+</style>
+</head>
+<body>
+
+<header>
+  <button class="srcbtn" id="srcBtn">
+    <span class="ico">📂</span>
+    <span class="t"><span class="n" id="srcName">待分类目录</span><span class="p" id="srcPath">点这里选择</span></span>
+    <span class="ico" style="opacity:.5">▾</span>
+  </button>
+  <button class="chip" id="filterChip" data-f="all" title="切换媒体类型（图片 / 视频 / 两者）">图+视</button>
+  <button class="hdrbtn" id="gridOpen" title="图集：分页浏览当前目录">▦</button>
+  <button class="hdrbtn" id="fsBtn" title="全屏显示（隐藏浏览器地址栏）">⛶</button>
+</header>
+
+<main>
+  <div class="stage" id="stage">
+    <div class="spinner" id="spin"></div>
+    <div class="hint" id="hint"><span class="big">🖼️</span>先选一个「待分类」目录<br>然后在下面配置目标目录</div>
+    <div class="badge" id="badge"></div>
+  </div>
+  <div class="film" id="film"></div>
+</main>
+
+<footer>
+  <div class="slots-outer">
+    <div class="slots-wrap" id="slotsWrap"><div class="slots" id="slots"></div></div>
+    <div class="slots-fade" id="slotsFade"></div>
+  </div>
+  <div class="tools">
+    <button class="btn" id="undo">↶ 撤销</button>
+    <button class="btn" id="discard">🗑 丢弃</button>
+    <button class="btn primary" id="setup">⚙ 设置</button>
+  </div>
+</footer>
+
+<!-- ============ 设置面板 ============ -->
+<div class="sheet" id="setupSheet">
+  <div class="card">
+    <h2><span>⚙ 目录设置</span><span class="sp"></span><button class="btn ghost icon" data-close="setupSheet">✕</button></h2>
+    <div class="body">
+      <div class="grp">播放</div>
+      <div class="item">
+        <span class="txt"><b>视频自动播放</b><span>翻到视频时自动开始播放。手机浏览器通常要求静音才允许自动播放，被拒绝时会显示 ▶ 按钮等你点。</span></span>
+        <button class="btn" id="autoplayBtn">开</button>
+      </div>
+
+      <div class="grp" style="margin-top:14px">全屏</div>
+      <div class="item">
+        <span class="txt"><b>自动全屏</b><span>打开页面后第一次点按即进入全屏（隐藏浏览器地址栏）。手动退出全屏会自动关掉这个开关。</span></span>
+        <button class="btn" id="autofsBtn">关</button>
+      </div>
+
+      <div class="grp" style="margin-top:14px">媒体类型</div>
+      <div class="seg">
+        <button class="btn" id="filter_all">图片 + 视频</button>
+        <button class="btn" id="filter_image">仅图片</button>
+        <button class="btn" id="filter_video">仅视频</button>
+      </div>
+
+      <div class="grp">待分类目录（源）</div>
+      <div id="setupSource"></div>
+
+      <div class="grp" style="margin-top:18px">目标目录（<span id="slotN">20</span> 个槽位）</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <button class="btn" id="batchBtn" style="flex:1">☑ 批量勾选子目录</button>
+        <button class="btn ghost" id="fillBtn" style="flex:0 0 auto">填充空槽</button>
+        <button class="btn ghost" id="swapBtn" style="flex:0 0 auto">⇅ 调整顺序</button>
+      </div>
+      <div class="note" id="swapHint" style="display:none;padding:2px 2px 10px"></div>
+      <div id="setupTargets"></div>
+
+      <div class="grp" style="margin-top:18px">丢弃目录</div>
+      <div id="setupDel"></div>
+
+      <div class="note" id="setupNote"></div>
+    </div>
+    <div class="foot">
+      <button class="btn ghost" id="clearAll">全部清空</button>
+      <button class="btn" id="clearTargets">清空目标</button>
+      <button class="btn" id="reloadCfg">重新读取</button>
+      <button class="btn primary" data-close="setupSheet">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 目录浏览器（选源 / 选槽位 / 批量勾选） ============ -->
+<div class="sheet" id="browseSheet">
+  <div class="card">
+    <h2><span id="browseTitle">选择目录</span><span class="sp"></span><button class="btn ghost icon" data-close="browseSheet">✕</button></h2>
+    <div class="body">
+      <div class="bar">
+        <button class="btn icon" id="bUp">↑</button>
+        <button class="btn icon" id="bHome">⌂</button>
+        <button class="btn icon" id="bReload">↻</button>
+      </div>
+      <div class="crumb" id="bCrumb"></div>
+      <div id="bHint" class="note" style="padding:8px 2px"></div>
+      <div id="bList"></div>
+    </div>
+    <div class="foot" id="bFoot">
+      <button class="btn ghost" data-close="browseSheet">取消</button>
+      <button class="btn primary" id="bConfirm">选定此目录</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ============ 图集：分页栅格 ============ -->
+<div class="sheet" id="gridSheet">
+  <div class="card">
+    <h2><span id="gridTitle">图集</span><span class="sp"></span><button class="btn ghost icon" data-close="gridSheet">✕</button></h2>
+    <div class="body">
+      <div class="gbar">
+        <button class="btn" id="sortNew">新 → 旧</button>
+        <button class="btn" id="sortOld">旧 → 新</button>
+        <span class="sp"></span>
+        <span class="pag" id="gridPage">— / —</span>
+      </div>
+      <div class="ggrid" id="gridBox"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="gridPrev">‹ 上一页</button>
+      <button class="btn" id="gridNext">下一页 ›</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ==========================================================================
+ * Snap Archive · DSH 插件版（跑在 DSH 进程内，经容器内挂载卷操作文件）
+ *
+ * 与 mobile/ 的零服务端版**交互完全一致**，只有「文件访问层」不同：
+ *   WebDAV 的 PROPFIND / MOVE+Overwrite:F / COPY / DELETE  →  本服务的 /api/*
+ * 移动端那套「Overwrite: F 得到 412 再改名重试」的绝不覆盖语义，改由服务端用原子占位
+ * （link / COPYFILE_EXCL）实现，见 docker/src/impl.mjs。
+ *
+ * 页面与 API 同源（都由 DSH 的 webServer 发出），所以没有 CORS 与预检问题。
+ *
+ * 三条写死的安全规则不变：
+ *   ① 绝不覆盖同名文件 —— 服务端原子占位，冲突时自动改名为「名 (1).ext」
+ *   ② 只移动、不删除文件；「丢弃」也只是移到你指定的目录
+ *   ③ 删除只对**空目录**生效（服务端 fs.rmdir，比 NAS 的 WebDAV DELETE 更安全：
+ *      实测该 NAS 对非空目录的 DELETE 会递归删掉整棵树）
+ * ==========================================================================*/
+
+/* 后端端点：必须与 src/routes.mjs 的值一致（改前缀要两处同改）。
+ * 独立服务监听自己的端口，所以直接用根路径（页面在 /，API 在 /api/*）。
+ * ORIGIN 故意留空字符串 —— 下面的业务代码到处写着 `ORIGIN + 路径`，
+ * 留空后它们自然退化成"虚拟路径"，于是这些调用点一行都不用动。 */
+const ROUTE = '';
+const API = ROUTE + '/api';
+const ORIGIN = '';
+const CFG_LS = 'snap.config.cache';
+const FILTER_LS = 'snap.filter';
+const AUTOPLAY_LS = 'snap.autoplay';
+const AUTOFS_LS = 'snap.autofs';
+const SORT_LS = 'snap.sort';
+const $ = (id) => document.getElementById(id);
+const IMG = new Set(['jpg','jpeg','png','gif','webp','avif','bmp']);
+const VID = new Set(['mp4','webm']);
+const SLOT_N = 20;                              // 4 列 × 5 行；底部默认只露 3 行，可上下滑
+const MAX_UNDO = 50;                            // 撤销栈深度（与桌面版一致）
+const GRID_PER_PAGE = 20;                       // 图集每页 4 列 × 5 行
+
+const dec = decodeURIComponent;
+const enc = encodeURIComponent;
+const extOf = (n) => { const i = n.lastIndexOf('.'); return i<0 ? '' : n.slice(i+1).toLowerCase(); };
+const baseOf = (h) => { const t = String(h).replace(/\/$/,''); return dec(t.slice(t.lastIndexOf('/')+1)); };
+const parentOf = (h) => { const p = h.replace(/\/$/,'').split('/'); p.pop(); return p.join('/')+'/'; };
+const human = (n) => n>1048576 ? (n/1048576).toFixed(1)+'MB' : n>1024 ? Math.round(n/1024)+'KB' : n+'B';
+const joinEnc = (dir, name) => dir + enc(name);
+/** 卷名 = 虚拟路径第一段（对应 WebDAV 的「挂载点」）。只用于在面包屑上标注"当前在哪个卷"。 */
+const poolOf = (p) => dec(String(p||'/').replace(/^\//,'').split('/')[0] || '/');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const labelOf = (path) => dec(String(path).replace(/\/$/,'').split('/').pop() || '/');
+
+const S = {
+  cwd: null, raw: [], files: [], dirs: [], index: 0, filter: 'all', autoplay: true, autoFs: false,
+  sortMode: 'mtime-desc', gridPage: 0, lastPickDir: null, swapMode: null, swapFirst: -1,
+  entryCount: 0, otherNames: [],
+  source: null, targets: new Array(SLOT_N).fill(null), del: null,
+  undoStack: [], busy: false, counts: {},
+  pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
+  dirty: false, saving: false,
+};
+
+/* ---------------- 提示 ---------------- */
+function toast(msg, kind, ms) {
+  const t = $('toast');
+  t.textContent = msg; t.className = 'toast show ' + (kind||'');
+  clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.className='toast'; }, ms || 3000);
+}
+/** 顶栏原来有个「已同步 / 保存中 / 读取中」的小字，按需求去掉了。
+ *  这里只保留"出错要让人知道"，其余状态一律忽略。 */
+function setSync(state, text) {
+  if (state === 'err') toast(text, 'err', 5000);
+}
+
+/* ---------------- 后端适配层（原本是 WebDAV 原语） ----------------
+ * 函数名与调用签名保持不变，所以下面的业务代码几乎一行都不用改：
+ *   propfind(vpath)                            ← PROPFIND Depth:1，null 表示目录不存在
+ *   listDirs(vpath)                            ← 只取子目录
+ *   place(src, name, size, destDir, noRename)  ← MOVE；服务端原子占位，绝不覆盖
+ * ------------------------------------------------------------------ */
+
+/** 列目录。返回条目数组；目录不存在返回 null（调用方据此区分"空"和"没了"）。 */
+async function propfind(vpath) {
+  const r = await fetch(API + '/list?path=' + enc(vpath || '/'), { credentials:'same-origin' });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('列目录失败 HTTP ' + r.status);
+  return (await r.json()).entries;
+}
+async function listDirs(dir) {
+  const l = await propfind(dir);
+  if (!l) return null;
+  return l.filter((e) => e.dir && e.href !== dir);
+}
+
+/**
+ * 把 srcHref 放进 destDir。服务端负责"绝不覆盖"：目标同名时自动改名为「名 (1).ext」，
+ * 与原来 MOVE + Overwrite: F 得到 412 再改名重试完全等价，只是由服务端一次完成。
+ * noRename=true 时目标同名直接报 409 —— 撤销需要"冲突即中止、不动任何文件"的语义。
+ *
+ * 注意：条目上的 href 是**纯路径标识**（保持路径语义，供 normPath/parentOf 等使用），
+ * 图片/视频要加载的是 url 字段（可直接 GET 的媒体地址），别混用。
+ */
+async function place(srcHref, srcName, srcSize, destDir, noRename) {
+  const r = await fetch(API + '/move', {
+    method:'POST', credentials:'same-origin',
+    headers:{ 'Content-Type':'application/json; charset=utf-8' },
+    body: JSON.stringify({ src: srcHref, destDir, noRename: !!noRename }),
+  });
+  let body = {};
+  try { body = await r.json(); } catch (e) { /* 非 JSON：下面统一按 HTTP 状态报错 */ }
+  if (!r.ok) {
+    const err = new Error(body.error || ('移动失败 HTTP ' + r.status));
+    err.status = r.status;                   // 让调用方区分"文件已经不在了(404)"与"同名冲突(409)"
+    throw err;
+  }
+  return body;                               // { finalName, destHref, renamed, mode }
+}
+
+/* ---------------- 配置：存在 NAS 上 ---------------- */
+function snapshot() {
+  return {
+    version: 1, source: S.source, targets: S.targets, del: S.del,
+    filter: S.filter, autoplay: S.autoplay, autoFs: S.autoFs, sort: S.sortMode,
+    undo: S.undoStack.slice(-MAX_UNDO),          // 撤销栈也持久化，刷新/换设备后还能继续撤销
+    updated: new Date().toISOString(),
+  };
+}
+function applyConfig(c) {
+  if (!c || typeof c !== 'object') return false;
+  if (c.source && c.source.path) S.source = { path: normPath(c.source.path), name: c.source.name || labelOf(c.source.path) };
+  if (Array.isArray(c.targets)) {
+    S.targets = c.targets.slice(0,SLOT_N)
+      .map((t) => (t && t.path) ? { path: normPath(t.path), name: t.name || labelOf(t.path) } : null)
+      .concat(new Array(SLOT_N).fill(null)).slice(0,SLOT_N);
+  }
+  if (c.del && c.del.path) S.del = { path: normPath(c.del.path), name: c.del.name || labelOf(c.del.path) };
+  if (c.filter && ['all','image','video'].includes(c.filter)) S.filter = c.filter;
+  if (typeof c.autoplay === 'boolean') S.autoplay = c.autoplay;
+  if (typeof c.autoFs === 'boolean') S.autoFs = c.autoFs;
+  if (c.sort === 'mtime-asc' || c.sort === 'mtime-desc') S.sortMode = c.sort;
+  if (Array.isArray(c.undo)) {
+    S.undoStack = c.undo
+      .filter((r) => r && typeof r.backDir === 'string' && typeof r.name === 'string' && typeof r.from === 'string')
+      .slice(-MAX_UNDO);
+  }
+  // 清理历史遗留的重复：同一目录不占两个槽位；目标/丢弃不能等于源（旧版本可能存成这样）
+  const seen = new Set();
+  if (S.source && S.source.path) seen.add(S.source.path);
+  let cleaned = false;
+  S.targets = S.targets.map((t) => {
+    if (!t) return null;
+    if (seen.has(t.path)) { cleaned = true; return null; }
+    seen.add(t.path);
+    return t;
+  });
+  if (S.del && seen.has(S.del.path)) { S.del = null; cleaned = true; }
+  configCleaned = cleaned;
+  return true;
+}
+async function loadConfig() {
+  try {
+    const r = await fetch(API + '/config?t=' + Date.now(), { credentials:'same-origin', cache:'no-store' });
+    if (r.ok) {
+      const c = JSON.parse(await r.text());
+      applyConfig(c);
+      if (configCleaned) scheduleSave();     // 清理过重复记录就顺手存回去
+      return true;
+    }
+    if (r.status === 404) return false;            // 首次使用：没有配置文件是正常的
+    setSync('err', `配置读取失败 HTTP ${r.status}（先用本地缓存）`);
+  } catch (e) {
+    // 退回浏览器缓存，至少别丢配置
+    try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(_) {}
+    setSync('err', '配置读取失败（先用本地缓存）');
+  }
+  return false;
+}
+let saveTimer = null;
+let configCleaned = false;      // 载入配置时清理过重复项 → 直接落盘
+function scheduleSave() {
+  S.dirty = true; setSync('on', '待保存…');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveConfig, 500);
+  try { localStorage.setItem(CFG_LS, JSON.stringify(snapshot())); } catch(e){}
+}
+async function saveConfig() {
+  if (S.saving) { scheduleSave(); return; }
+  S.saving = true; setSync('on', '保存中…');
+  try {
+    const r = await fetch(API + '/config', { method:'PUT', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json; charset=utf-8' },
+      body: JSON.stringify(snapshot(), null, 2) });
+    if (!(r.status>=200 && r.status<300)) throw new Error('HTTP ' + r.status);
+    S.dirty = false;
+    setSync('ok', '已存到 NAS');
+    try { localStorage.setItem(CFG_LS, JSON.stringify(snapshot())); } catch(e){}
+  } catch (e) {
+    setSync('err', '配置没能保存到 NAS：' + e.message + '（下次打开可能丢失）');
+  } finally { S.saving = false; }
+}
+
+/* ---------------- 浏览源目录 ---------------- */
+/** force=true 时无视 busy 守卫。
+ *  必须提供这个口子：删除目录、撤销这类操作是"自己在 busy 作用域里"需要刷新目录的，
+ *  否则 openSource 会被自己的 busy 挡掉，出现"操作成功了但界面没动"。 */
+async function openSource(dir, force) {
+  if (S.busy && !force) return;
+  S.busy = true;
+  try {
+    const list = await propfind(dir);
+    if (!list) throw new Error('目录不存在');
+    const items = list.filter((e) => e.href !== dir && e.href !== dir.replace(/\/$/,''));
+    S.cwd = dir.endsWith('/') ? dir : dir + '/';
+    S.dirs = items.filter((e) => e.dir);
+    S.raw = items.filter((e) => !e.dir && (IMG.has(extOf(e.name)) || VID.has(extOf(e.name))));
+    // 目录里"所有条目"的数量（含子目录与 txt/DS_Store 之类非媒体文件）——
+    // 判断能否删除只认这个数：非空就绝不删，避免把 txt 之类的文件一起处理掉
+    S.entryCount = items.length;
+    S.otherNames = items.filter((e) => e.dir || !(IMG.has(extOf(e.name)) || VID.has(extOf(e.name))))
+                        .map((e) => e.name);
+    showList(true);                     // 换目录后从第 1 个开始（内部会按当前排序规则排好）
+  } catch (e) {
+    toast(e.message, 'err', 5000);
+  } finally { S.busy = false; }
+}
+
+/* 媒体类型筛选：all=图片+视频 / image=仅图片 / video=仅视频
+   S.raw 是目录里的全部媒体，S.files 是筛选后的结果 */
+/* 媒体类型筛选：all=图片+视频 / image=仅图片 / video=仅视频
+   S.raw 是目录里的全部媒体（唯一事实来源），S.files 是筛选后的可见列表。
+   注意：移动文件时必须同时从 S.raw 里删掉，否则切换筛选会让已移走的图"复活"，
+   再去点它就是 404。 */
+function buildFiles() {
+  const f = S.filter;
+  S.files = S.raw.filter((e) => f === 'all' ? true
+    : f === 'image' ? IMG.has(extOf(e.name)) : VID.has(extOf(e.name)));
+}
+
+/** 按修改时间排序（桌面版同款：新→旧 / 旧→新）
+ *  注意 WebDAV 的 getlastmodified 只有秒级精度，同一秒的连拍照片会打平 ——
+ *  所以时间相同时按文件名自然序稳定兜底（桌面版也是这个规则） */
+function sortRaw() {
+  const dir = S.sortMode === 'mtime-asc' ? 1 : -1;
+  S.raw.sort((a, b) => (a.mtime - b.mtime) * dir
+    || String(a.name).localeCompare(String(b.name), 'zh', { numeric: true }));
+}
+
+/** 重算列表并渲染。resetIndex=true 时回到第 1 个（切换媒体类型用） */
+function showList(resetIndex) {
+  sortRaw();
+  buildFiles();
+  S.index = resetIndex ? 0 : Math.min(S.index, Math.max(0, S.files.length - 1));
+  updateFilterUI();
+  render();
+  preload();
+}
+
+/** 切换排序：尽量停在当前这张，别让人找不到 */
+function setSort(mode) {
+  S.sortMode = (mode === 'mtime-asc') ? 'mtime-asc' : 'mtime-desc';
+  try { localStorage.setItem(SORT_LS, S.sortMode); } catch(e){}
+  const cur = S.files[S.index];
+  sortRaw(); buildFiles();
+  const i = cur ? S.files.findIndex((f) => f.href === cur.href) : -1;
+  S.index = i >= 0 ? i : 0;
+  updateSortUI(); render(); preload();
+  if ($('gridSheet').classList.contains('on')) { S.gridPage = Math.floor(S.index / GRID_PER_PAGE); renderGrid(); }
+  scheduleSave();
+  toast('排序：' + (S.sortMode === 'mtime-asc' ? '旧 → 新' : '新 → 旧'), 'ok', 1400);
+}
+
+function updateSortUI() {
+  const n = $('sortNew'), o = $('sortOld');
+  if (n) n.classList.toggle('on', S.sortMode !== 'mtime-asc');
+  if (o) o.classList.toggle('on', S.sortMode === 'mtime-asc');
+}
+
+/* ---------------- 图集：4 列 × 5 行分页 ---------------- */
+function openGrid() {
+  if (!S.files.length) { toast('当前目录里没有可浏览的图片或视频', 'warn'); return; }
+  S.gridPage = Math.floor(S.index / GRID_PER_PAGE);
+  $('gridTitle').textContent = '图集 · ' + (S.cwd ? labelOf(S.cwd) : '') + '（' + S.files.length + '）';
+  $('gridSheet').classList.add('on');
+  updateSortUI();
+  renderGrid();
+}
+
+function renderGrid() {
+  const box = $('gridBox'); box.innerHTML = '';
+  const pages = Math.max(1, Math.ceil(S.files.length / GRID_PER_PAGE));
+  S.gridPage = Math.min(Math.max(0, S.gridPage), pages - 1);
+  const start = S.gridPage * GRID_PER_PAGE;
+  S.files.slice(start, start + GRID_PER_PAGE).forEach((f, k) => {
+    const gi = start + k;
+    const isV = VID.has(extOf(f.name));
+    const b = document.createElement('button');
+    b.className = 'gcell' + (gi === S.index ? ' sel' : '');
+    b.innerHTML = (isV
+        ? `<video src="${f.url}#t=0.1" preload="metadata" muted playsinline></video><span class="v">▶</span>`
+        : `<img loading="lazy" src="${f.url}" alt="">`)
+      + `<span class="d">${gi + 1}</span>`;
+    b.onclick = () => {
+      S.index = gi;
+      $('gridSheet').classList.remove('on');
+      renderStage(); renderFilm(); preload();
+    };
+    box.append(b);
+  });
+  $('gridPage').textContent = `${S.gridPage + 1} / ${pages}`;
+  $('gridPrev').disabled = S.gridPage <= 0;
+  $('gridNext').disabled = S.gridPage >= pages - 1;
+}
+
+function gridStep(d) {
+  S.gridPage += d;
+  renderGrid();
+  const body = $('gridSheet').querySelector('.body');
+  if (body) body.scrollTop = 0;
+}
+
+function updateFilterUI() {
+  const label = { all:'图+视', image:'仅图片', video:'仅视频' }[S.filter] || '图+视';
+  const chip = $('filterChip');
+  if (chip) { chip.textContent = label; chip.dataset.f = S.filter; }
+  ['all','image','video'].forEach((k) => {
+    const b = $('filter_' + k);
+    if (b) b.classList.toggle('on', S.filter === k);
+  });
+}
+
+function setFilter(f) {
+  if (!['all','image','video'].includes(f)) f = 'all';
+  S.filter = f;
+  try { localStorage.setItem(FILTER_LS, f); } catch(e){}
+  showList(true);                       // ★ 切换后回到列表第 1 个
+  scheduleSave();                       // 顺手存进 NAS 上的配置
+  toast('媒体类型：' + ({all:'图片 + 视频', image:'仅图片', video:'仅视频'}[f])
+    + (S.files.length ? `（${S.files.length} 个）` : '（没有）'), 'ok', 1400);
+}
+
+/* 视频自动播放开关（与桌面版语义一致：只影响主图，缩略图永不自动播） */
+function updateAutoplayUI() {
+  const b = $('autoplayBtn');
+  if (!b) return;
+  b.textContent = S.autoplay ? '开' : '关';
+  b.classList.toggle('on', S.autoplay);
+  b.style.borderColor = S.autoplay ? 'var(--ok)' : 'var(--line)';
+  b.style.color = S.autoplay ? 'var(--ok)' : 'var(--dim)';
+}
+function setAutoplay(v) {
+  S.autoplay = !!v;
+  try { localStorage.setItem(AUTOPLAY_LS, S.autoplay ? '1' : '0'); } catch(e){}
+  updateAutoplayUI();
+  scheduleSave();
+  renderStage();                        // 立刻生效：打开就播，关闭就停在首帧
+  toast('视频自动播放：' + (S.autoplay ? '开' : '关'), 'ok', 1400);
+}
+
+/* ---------------- 全屏 ----------------
+ * 说明：Fullscreen API 不需要安全上下文（HTTPS），所以 http:// 下也能用；
+ * 但"像 App 一样独立窗口、无地址栏"的 PWA 安装必须要 HTTPS + Service Worker，
+ * 明文 http 下 Edge 只能建一个普通书签快捷方式。 */
+const isFs = () => !!document.fullscreenElement;
+function updateFsUI() {
+  const b = $('fsBtn');
+  if (b) {
+    b.textContent = isFs() ? '⤡' : '⛶';
+    b.title = isFs() ? '退出全屏' : '全屏显示（隐藏浏览器地址栏）';
+    b.style.borderColor = isFs() ? 'var(--acc)' : 'var(--line)';
+    b.style.color = isFs() ? 'var(--acc)' : 'var(--fg)';
+  }
+  const a = $('autofsBtn');
+  if (a) {
+    a.textContent = S.autoFs ? '开' : '关';
+    a.style.borderColor = S.autoFs ? 'var(--ok)' : 'var(--line)';
+    a.style.color = S.autoFs ? 'var(--ok)' : 'var(--dim)';
+  }
+}
+async function toggleFullscreen() {
+  try {
+    if (isFs()) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+  } catch (e) {
+    toast('这个浏览器不允许全屏：' + (e.message || e.name || e), 'warn', 3500);
+  }
+  updateFsUI();
+}
+function setAutoFs(v) {
+  S.autoFs = !!v;
+  try { localStorage.setItem(AUTOFS_LS, S.autoFs ? '1' : '0'); } catch(e){}
+  updateFsUI(); scheduleSave(); armAutoFs();
+  toast('自动全屏：' + (S.autoFs ? '开（下次点按生效）' : '关'), 'ok', 1800);
+}
+/** 自动全屏必须由用户手势触发，所以"进入页面后的第一次点按/按键"才是时机 */
+let fsArmed = false;
+function armAutoFs() {
+  if (!S.autoFs || isFs() || fsArmed) return;
+  fsArmed = true;
+  const once = () => {
+    document.removeEventListener('pointerdown', once, true);
+    document.removeEventListener('keydown', once, true);
+    fsArmed = false;
+    if (S.autoFs && !isFs()) {
+      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(updateFsUI).catch(() => {});
+    }
+  };
+  document.addEventListener('pointerdown', once, true);
+  document.addEventListener('keydown', once, true);
+}
+document.addEventListener('fullscreenchange', () => {
+  updateFsUI();
+  // 手动退出全屏 → 关掉自动全屏，免得下次点按又被弹进去
+  if (!isFs() && S.autoFs) {
+    S.autoFs = false;
+    try { localStorage.setItem(AUTOFS_LS, '0'); } catch(e){}
+    scheduleSave(); updateFsUI();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') armAutoFs();
+});
+
+function preload() {
+  for (const i of [S.index+1, S.index+2, S.index-1]) {
+    const f = S.files[i];
+    if (f && IMG.has(extOf(f.name))) { const im = new Image(); im.src = f.url; }
+  }
+}
+
+/* ---------------- 渲染 ---------------- */
+function render() {
+  renderHeader(); renderStage(); renderFilm(); renderSlots();
+}
+
+function renderHeader() {
+  $('srcName').textContent = S.source ? S.source.name : '未选择待分类目录';
+  // 路径显示"当前正在看的目录"；若它不是待分类目录（例如正在浏览某个目标槽位），如实标注
+  if (!S.cwd) { $('srcPath').textContent = '点这里选择'; return; }
+  const notSource = S.source && normPath(S.source.path) !== normPath(S.cwd);
+  $('srcPath').textContent = dec(S.cwd) + (notSource ? '（仅浏览，非待分类目录）' : '');
+}
+
+function renderStage() {
+  const st = $('stage');
+  // 清掉上一张图/视频与播放键，保留 spinner / hint / badge
+  st.querySelectorAll('img,video,.playbtn').forEach((n)=>n.remove());
+  const hint = $('hint');
+  const f = S.files[S.index];
+  if (!f) {
+    hint.style.display = '';
+    const fname = { all:'图片或视频', image:'图片', video:'视频' }[S.filter] || '媒体';
+    if (!S.cwd) {
+      hint.innerHTML = `<span class="big">🖼️</span>先选一个「待分类」目录<br>然后在下面配置目标目录`;
+    } else if (S.raw.length) {
+      hint.innerHTML = `<span class="big">🔍</span>当前筛选（仅${fname}）下没有文件<br>`
+        + `这个目录另有 <b>${S.raw.length}</b> 个其它媒体<br>点右上角的媒体类型按钮可切换`;
+    } else if (S.entryCount > 0) {
+      // 没有图片视频，但目录并不空（有子目录或 txt/隐藏文件之类）—— 说清为什么不能删
+      const names = S.otherNames.slice(0, 3).map(esc).join('、') + (S.otherNames.length > 3 ? '…' : '');
+      hint.innerHTML = `<span class="big">📄</span>这个目录里没有图片或视频<br>`
+        + `还有 ${S.entryCount} 个其它条目（${esc(names)}）<br>`
+        + (S.dirs.length ? '点下面的 📁 进入子目录' : '清空后才可以删除这个目录');
+    } else {
+      hint.innerHTML = `<span class="big">🖼️</span>这个目录是空的<br>可用「⚙ 设置」换一个，或直接删掉它`;
+    }
+    renderBadge(null);
+    if (canDeleteSource()) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.style.cssText = 'margin-top:14px;color:var(--bad);border-color:#6e2b28';
+      b.textContent = '🗑 删除这个空文件夹';
+      b.onclick = deleteSourceDir;
+      hint.append(document.createElement('br'), b);
+    }
+    return;
+  }
+  hint.style.display = 'none';
+  const isV = VID.has(extOf(f.name));
+  const el = document.createElement(isV ? 'video' : 'img');
+  el.src = isV ? f.url + '#t=0.1' : f.url;      // #t=0.1 让移动端也能画出首帧
+  if (isV) { el.controls = true; el.playsInline = true; el.preload = 'metadata'; }
+  const spin = $('spin'); spin.classList.add('on');
+  const done = () => spin.classList.remove('on');
+  el.addEventListener('load', done); el.addEventListener('loadeddata', done); el.addEventListener('error', done);
+  st.insertBefore(el, $('badge'));
+  if (isV) {
+    const pb = document.createElement('button');
+    pb.className = 'playbtn'; pb.type = 'button'; pb.textContent = '▶';
+    pb.setAttribute('aria-label', '播放');
+    pb.onclick = (e) => { e.stopPropagation(); el.paused ? el.play() : el.pause(); };
+    el.addEventListener('play', () => pb.classList.add('hidden'));
+    el.addEventListener('pause', () => pb.classList.remove('hidden'));
+    el.addEventListener('ended', () => pb.classList.remove('hidden'));
+    st.insertBefore(pb, $('badge'));
+    if (S.autoplay) el.play().catch(() => {});   // 被浏览器拒绝时播放键仍在，等用户点
+  }
+  renderBadge(f);
+}
+
+function renderBadge(f) {
+  const b = $('badge'); b.innerHTML = '';
+  if (!f) return;
+  const add = (t) => { const s = document.createElement('span'); s.textContent = t; b.append(s); };
+  add(`第 ${S.index+1} / ${S.files.length} 张`);
+  add(`剩余 ${S.files.length - S.index}`);
+  add(human(f.size));
+  if (VID.has(extOf(f.name))) add('视频');
+}
+
+function renderFilm() {
+  const box = $('film'); box.innerHTML = '';
+  S.dirs.forEach((d) => {
+    const b = document.createElement('button');
+    b.className = 'th dir'; b.textContent = '📁 ' + d.name.slice(0,8);
+    b.onclick = () => goToDir(d.href);
+    box.append(b);
+  });
+  S.files.forEach((f, i) => {
+    const b = document.createElement('button');
+    b.className = 'th' + (i===S.index ? ' sel' : '');
+    const isV = VID.has(extOf(f.name));
+    b.innerHTML = isV
+      ? `<video src="${f.url}#t=0.1" preload="metadata" muted playsinline></video><span class="v">▶</span>`
+      : `<img loading="lazy" src="${f.url}" alt="">`;
+    b.onclick = () => { S.index = i; renderStage(); renderFilm(); preload(); scrollFilmIntoView(i); };
+    box.append(b);
+  });
+  const sel = box.querySelector('.th.sel');
+  if (sel) sel.scrollIntoView({ inline:'center', block:'nearest' });
+}
+function scrollFilmIntoView() {
+  const sel = $('film').querySelector('.th.sel');
+  if (sel) sel.scrollIntoView({ inline:'center', block:'nearest', behavior:'smooth' });
+}
+
+/* 槽位按钮只创建一次，之后一律"原地更新"。
+   这点很重要：如果每次移动都 innerHTML='' 重建，清空的瞬间内容高度归零，
+   浏览器会把滚动位置钳回顶部 —— 用户滑到第 4、5 行点一下就被弹回去。 */
+let slotEls = [];
+function buildSlots() {
+  const box = $('slots'); box.innerHTML = '';
+  slotEls = [];
+  for (let i = 0; i < SLOT_N; i++) {
+    const b = document.createElement('button');
+    b.className = 'slot empty';
+    b.dataset.slot = String(i);
+    b.innerHTML = `<span class="k">${i+1}</span><span class="n"></span><span class="c"></span>`;
+    b.onclick = () => { const t = S.targets[i]; t ? classify(t, b) : openPicker('slot', i); };
+    b.oncontextmenu = (e) => { e.preventDefault(); openPicker('slot', i); };
+    box.append(b);
+    slotEls.push(b);
+  }
+  updateSlotsFade();
+}
+
+function renderSlots() {
+  S.targets.forEach((t, i) => {
+    const b = slotEls[i];
+    if (!b) return;
+    b.className = 'slot' + (t ? '' : ' empty');
+    b.querySelector('.n').textContent = t ? t.name : '未设置';
+    b.querySelector('.c').textContent = t
+      ? (S.counts[t.path] != null ? S.counts[t.path] + ' 个' : '…')
+      : '';
+  });
+  const n = S.undoStack.length;
+  const ub = $('undo');
+  ub.disabled = n === 0;
+  ub.innerHTML = n > 0 ? `↶ 撤销<span class="cnt">${n}</span>` : '↶ 撤销';
+  ub.title = n > 0 ? `撤销最近一次移动，还可撤销 ${n} 步` : '没有可撤销的操作';
+  $('discard').disabled = false;
+  updateSlotsFade();
+}
+
+/** 还有内容没露出来时，底部显示一层渐隐提示 */
+function updateSlotsFade() {
+  const w = $('slotsWrap'), f = $('slotsFade');
+  if (!w || !f) return;
+  f.classList.toggle('on', (w.scrollHeight - w.clientHeight - w.scrollTop) > 4);
+}
+
+/* ---------------- 分类 ---------------- */
+async function classify(target, slotEl) {
+  if (S.busy) return;
+  const f = S.files[S.index];
+  if (!f) { toast('这个目录里没有可分类的图片', 'warn'); return; }
+  S.busy = true;
+  try {
+    const destDir = target.path.endsWith('/') ? target.path : target.path + '/';
+    const res = await place(f.href, f.name, f.size, destDir);
+    S.undoStack.push({ backDir: S.cwd, name: res.finalName, from: res.destHref, mode: res.mode });
+    if (S.undoStack.length > MAX_UNDO) S.undoStack.shift();
+    scheduleSave();                         // 撤销栈也存进 NAS，刷新/换设备后仍可撤销
+    if (S.counts[target.path] != null) S.counts[target.path] += 1;
+    if (navigator.vibrate) navigator.vibrate(12);
+    const renamed = res.finalName !== f.name;
+    toast(`已移到「${target.name}」${renamed ? '，改名为 ' + res.finalName : ''}`, 'ok', 1800);
+    S.files.splice(S.index, 1);
+    // ★ 必须同时从 S.raw 里删掉：否则切换媒体类型时 buildFiles() 会把它重新算回来，
+    //   列表里就出现"已经移走的图片"，再去点它必然 404
+    const k = S.raw.findIndex((e) => e.href === f.href);
+    if (k >= 0) S.raw.splice(k, 1);
+    // 目录里的总条目数也要减 1：否则处理完最后一张照片后，删除入口永远不出现
+    S.entryCount = Math.max(0, S.entryCount - 1);
+    if (S.index >= S.files.length) S.index = Math.max(0, S.files.length-1);
+    render(); preload();
+    // 闪光必须放在 render 之后：renderSlots 会重设 className，先加会被冲掉
+    if (slotEl) {
+      slotEl.classList.add('flash');
+      setTimeout(() => slotEl.classList.remove('flash'), 600);
+    }
+    updateSlotsFade();      // 计数文字变化可能影响是否需要滚动提示
+  } catch (e) {
+    if (e.status === 404) {
+      // 源文件已经不在（多半是别处移走了）：从列表里摘掉它，别让用户反复点、反复报错
+      toast('这个文件已不在源目录，已从列表移除', 'warn', 4000);
+      const j = S.raw.findIndex((x) => x.href === f.href);
+      if (j >= 0) S.raw.splice(j, 1);
+      const i2 = S.files.findIndex((x) => x.href === f.href);
+      if (i2 >= 0) S.files.splice(i2, 1);
+      if (S.index >= S.files.length) S.index = Math.max(0, S.files.length - 1);
+      render(); preload();
+    } else {
+      toast(e.message, 'err', 5000);
+    }
+  } finally { S.busy = false; }
+}
+
+async function undo() {
+  if (S.busy) return;
+  const rec = S.undoStack[S.undoStack.length - 1];
+  if (!rec) { toast('没有可撤销的操作', 'warn'); return; }
+  S.busy = true;
+  toast('撤销中…', '', 1200);
+  let done = false, gone = false;
+  try {
+    // 反向移动，且 noRename=true：原位置已有同名时必须中止（等价于原来 MOVE 得到 412），
+    // 绝不能靠自动改名"绕过" —— 那会把文件落到一个用户没预期的名字上。
+    // 服务端用原子占位，所以中止时磁盘上什么都没动。
+    await place(rec.from, rec.name, 0, rec.backDir, true);
+    done = true;
+  } catch (e) {
+    if (e.status === 409) {
+      toast('原位置已有同名文件，撤销中止（没有改动任何文件）', 'err', 5000);
+    } else if (e.status === 404) {
+      gone = true;                               // 这一步已无法撤销，弹掉它，免得卡住后面几十步
+      dropUndo(rec);
+      toast('这一步的文件已不在原目标位置（可能被别的程序移动过），已跳过', 'warn', 5000);
+    } else {
+      toast(e.message, 'err', 5000);
+    }
+  } finally {
+    S.busy = false;                             // ★ 必须先释放，openSource 才不会被 busy 挡掉
+  }
+  if (done) {
+    dropUndo(rec);
+    await openSource(S.cwd, true);
+    // 桌面版的行为：撤销后跳回被撤销的那张（而不是停在列表第 1 张），
+    // 这样能立刻看到它、必要时重新分类
+    const i = S.files.findIndex((f) => f.name === rec.name);
+    if (i >= 0) {
+      S.index = i;
+      renderStage(); renderFilm(); preload();
+      scrollFilmIntoView();
+    }
+    toast(`已撤销：${rec.name} → 第 ${S.index + 1} / ${S.files.length} 张`
+      + (S.undoStack.length ? `（还可撤 ${S.undoStack.length} 步）` : ''), 'ok', 2400);
+  }
+}
+
+function dropUndo(rec) {
+  const i = S.undoStack.lastIndexOf(rec);
+  if (i >= 0) S.undoStack.splice(i, 1);
+  scheduleSave();
+  renderSlots();
+}
+
+/** 首页里直接进入某个目录 = 把它当作「待分类目录」。
+ *  以前这里只改浏览位置、不改源，于是出现"正在分类 A，左上角却写着未选择源"的错乱。
+ *  若该目录已经是某个目标槽位/丢弃目录（不能同时当源），则只浏览、不动源。 */
+function goToDir(dir) {
+  const p = normPath(dir);
+  if (!S.source || normPath(S.source.path) !== p) {
+    const d = conflictWith(p, { selfSource: true });
+    if (!d) {
+      S.source = { path: p, name: labelOf(p) };
+      scheduleSave();
+      renderHeader();
+    }
+  }
+  openSource(p, true);
+}
+
+/* ---------------- 删除空文件夹（桌面版的收尾动作） ---------------- */
+/** 只有整个目录**一个条目都没有**时才允许删（子目录、txt、隐藏文件都算非空）。
+ *  宁可让人去文件管理器里手动清干净，也不要在应用里"顺手"处理掉非图片视频的东西。 */
+function canDeleteSource() {
+  return !!(S.source && S.source.path && S.cwd === S.source.path && S.entryCount === 0);
+}
+
+async function deleteSourceDir() {
+  if (S.busy) return;
+  const dir = S.source && S.source.path;
+  if (!dir) { toast('还没有设置待分类目录', 'warn'); return; }
+  S.busy = true;
+  let done = false, dropped = 0, goneName = '';
+  try {
+    // 以磁盘上的实时状态为准：只要还有**任何**条目（子目录、txt、隐藏文件…）就拒绝删除，
+    // 不自动搬运、不"顺手"处理非图片视频的东西。
+    // 服务端用的是 fs.rmdir —— 它只对空目录成功，所以这里是"双保险"：即使前端这层判断
+    // 被绕过，非空目录在服务端照样会被拒（而旧的 WebDAV DELETE 会递归删掉整棵树）。
+    const list = await propfind(dir);
+    if (!list) throw new Error('目录已经不存在了');
+    const entries = list.filter((e) => normPath(e.href) !== normPath(dir));
+    if (entries.length) {
+      const names = entries.slice(0, 5).map((e) => e.name).join('、');
+      const more = entries.length > 5 ? ` 等共 ${entries.length} 项` : '';
+      throw new Error(`目录不是空的，不能删：还有 ${entries.length} 项（${names}${more}）。`
+        + `本应用只处理图片和视频，请先在文件管理器里处理掉它们，清空后再删。`);
+    }
+    if (!confirm(`删除空目录「${S.source.name}」？\n（不可撤销；磁盘上的这个文件夹会被删掉）`)) return;
+    const d = await fetch(API + '/rmdir', {
+      method:'POST', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json; charset=utf-8' },
+      body: JSON.stringify({ path: dir }),
+    });
+    if (!d.ok) {
+      let msg = 'HTTP ' + d.status;
+      try { msg = (await d.json()).error || msg; } catch (e) { /* 非 JSON 就保留状态码文案 */ }
+      throw new Error('删除目录失败：' + msg);
+    }
+    // 撤销栈里"退回这个目录"的步骤已无法执行，清掉并如实告知
+    const before = S.undoStack.length;
+    S.undoStack = S.undoStack.filter((r) => normPath(r.backDir) !== normPath(dir));
+    dropped = before - S.undoStack.length;
+    goneName = S.source.name;
+    done = true;
+  } catch (e) {
+    toast(e.message, 'err', 6000);
+  } finally {
+    S.busy = false;             // ★ 先释放，否则下面的 openSource 会被 busy 挡掉（同 undo 那个坑）
+  }
+  if (!done) return;
+
+  S.source = null;
+  S.cwd = null; S.raw = []; S.files = []; S.index = 0; S.entryCount = 0; S.otherNames = [];
+  scheduleSave();
+  renderHeader(); renderSlots(); render();
+  const parent = parentOf(dir);
+  await openSource(parent, true);
+  // 删完停在父目录：下次选新目录就从这里开始，不用再从根目录一层层找
+  S.lastPickDir = S.cwd || parent;
+  toast(`已删除「${goneName}」` + (dropped ? `；${dropped} 步撤销已失效并移除` : ''), 'ok', 4500);
+}
+
+/* ---------------- 设置面板 ---------------- */
+function openSetup() {
+  S.swapMode = null; S.swapFirst = -1;      // 每次打开都从普通模式开始
+  const sn = $('slotN'); if (sn) sn.textContent = SLOT_N;   // 槽位文案跟着常量走，避免再次漂移
+  renderSetup();
+  updateAutoplayUI();
+  updateFsUI();
+  $('setupSheet').classList.add('on');
+  refreshCounts();
+}
+function renderSetup() {
+  const mode = S.swapMode;                    // null | 'slot'（调顺序）| 'source'（源与目标互换）
+  const mk = (txt, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'btn ' + (cls || ''); b.textContent = txt; b.onclick = fn; return b;
+  };
+
+  /** idx: -2=源, -1=丢弃, >=0=槽位序号 */
+  const rowFor = (label, val, idx) => {
+    const r = document.createElement('div'); r.className = 'item';
+    r.innerHTML = `<span class="idx">${label}</span>
+      <span class="txt">${val
+        ? `<b>${esc(val.name)}</b><span>${esc(dec(val.path))}</span>`
+        : `<span style="color:#63707e">未设置</span>`}</span>`;
+    const acts = document.createElement('span'); acts.className = 'acts';
+
+    if (mode === 'slot' && idx >= 0) {
+      // 调整顺序：先选一个槽位，再点另一个即交换（可以和空槽位换）
+      const picked = S.swapFirst === idx;
+      acts.append(mk(picked ? '已选' : '选它', () => {
+        if (S.swapFirst < 0) { S.swapFirst = idx; renderSetup(); }
+        else { const a = S.swapFirst; S.swapFirst = -1; doSwapSlots(a, idx); }
+      }, picked ? 'primary' : ''));
+    } else if (mode === 'source' && idx >= 0) {
+      // 源与目标互换：点哪个槽位，就把那个目录当新的待分类目录
+      acts.append(mk('换它', () => doSwapSourceWithSlot(idx), val ? '' : 'ghost'));
+    } else {
+      const onBrowse = idx === -2 ? () => openPicker('source', -1, 'setup')
+                     : idx === -1 ? () => openPicker('del', -1, 'setup')
+                     : () => openPicker('slot', idx, 'setup');
+      const onCurrent = idx === -2 ? () => setSource(S.cwd)
+                      : idx === -1 ? () => setDel(S.cwd)
+                      : () => setTarget(idx, S.cwd);
+      const onClear = idx === -2 ? () => setSource(null)
+                    : idx === -1 ? () => setDel(null)
+                    : () => setTarget(idx, null);
+      acts.append(mk('浏览', onBrowse), mk('当前', onCurrent), mk('清', onClear, 'ghost'));
+    }
+    r.append(acts);
+    return r;
+  };
+
+  // ---- 源 ----
+  const sb = $('setupSource'); sb.innerHTML = '';
+  sb.append(rowFor('源', S.source, -2));
+  const srcActs = document.createElement('div');
+  srcActs.style.cssText = 'display:flex;gap:6px;margin-top:8px';
+  srcActs.append(
+    mk(mode === 'source' ? '✕ 取消互换' : '⇄ 和某个目标槽位互换',
+       () => { S.swapMode = mode === 'source' ? null : 'source'; S.swapFirst = -1; renderSetup(); },
+       'ghost'),
+  );
+  srcActs.firstChild.style.flex = '1';
+  sb.append(srcActs);
+  if (canDeleteSource()) {
+    const db = mk('🗑 删除这个空文件夹（已处理完）',
+      () => { $('setupSheet').classList.remove('on'); deleteSourceDir(); });
+    db.style.cssText = 'margin-top:8px;width:100%;color:var(--bad);border-color:#6e2b28';
+    sb.append(db);
+  }
+
+  // ---- 全部槽位 ----
+  const tb = $('setupTargets'); tb.innerHTML = '';
+  for (let i = 0; i < SLOT_N; i++) tb.append(rowFor(String(i + 1), S.targets[i], i));
+
+  // ---- 丢弃 ----
+  const db2 = $('setupDel'); db2.innerHTML = '';
+  db2.append(rowFor('🗑', S.del, -1));
+
+  // ---- 互换模式的说明与退出 ----
+  const hint = $('swapHint');
+  if (mode) {
+    hint.style.display = '';
+    hint.innerHTML = mode === 'slot'
+      ? '调整顺序：点一个槽位的「选它」，再点另一个槽位即交换（可以和空槽位换）。'
+      : '源与目标互换：点某个槽位的「换它」，那个目录就成为新的待分类目录，原源目录放进该槽位。';
+  } else {
+    hint.style.display = 'none';
+    hint.innerHTML = '';
+  }
+
+  $('setupNote').innerHTML =
+    `· 目标可以是<b>同一块盘上的任意目录</b>（跨目录正常）；与源不同盘的槽位会标 ⚠，那种情况会改用「复制+校验+删除」<br>`
+  + `· 配置会<b>保存到 NAS 上本页旁边的 snap-config.json</b>，换设备/换浏览器/清缓存都能沿用<br>`
+  + `· 长按或右键槽位也能快速改；「☑ 批量勾选子目录」可以一次挑多个<br>`
+  + `· 当前源在存储池 <b>${esc(srcPool || '—')}</b>`;
+}
+
+/* ---------------- 槽位顺序调整 / 源与目标互换 ---------------- */
+function doSwapSlots(a, b) {
+  if (a === b) { toast('同一个槽位，不用换', 'warn'); return; }
+  const tmp = S.targets[a];
+  S.targets[a] = S.targets[b];
+  S.targets[b] = tmp;
+  scheduleSave(); renderSetup(); renderSlots();
+  const na = S.targets[a] ? `「${S.targets[a].name}」` : '空';
+  const nb = S.targets[b] ? `「${S.targets[b].name}」` : '空';
+  toast(`槽位 ${a + 1} 与 ${b + 1} 已交换：${a + 1}→${na}，${b + 1}→${nb}`, 'ok', 3000);
+}
+
+function doSwapSourceWithSlot(i) {
+  const t = S.targets[i];
+  if (!t) { toast('这个槽位是空的，先把目录放进槽位再换', 'warn'); return; }
+  const old = S.source;
+  S.source = { path: t.path, name: t.name };
+  S.targets[i] = old ? { path: old.path, name: old.name } : null;
+  S.swapMode = null; S.swapFirst = -1;
+  scheduleSave(); renderSetup(); renderSlots(); renderHeader();
+  toast(old
+    ? `已互换：「${S.source.name}」成为待分类目录，原源目录「${old.name}」放进槽位 ${i + 1}`
+    : `已把「${S.source.name}」设为待分类目录（槽位 ${i + 1} 清空）`, 'ok', 4000);
+  openSource(S.source.path, true);
+}
+
+/** 目录归属冲突检查：同一个目录不能既是源又是目标，也不能占两个槽位 */
+const normPath = (p) => { const s = String(p || ''); return s.endsWith('/') ? s : s + '/'; };
+function conflictWith(path, { selfSlot = -1, selfSource = false, selfDel = false } = {}) {
+  const p = normPath(path);
+  for (let i = 0; i < SLOT_N; i++) {
+    if (i === selfSlot) continue;
+    if (S.targets[i] && normPath(S.targets[i].path) === p) return { kind:'slot', i };
+  }
+  if (!selfDel && S.del && normPath(S.del.path) === p) return { kind:'del' };
+  if (!selfSource && S.source && normPath(S.source.path) === p) return { kind:'source' };
+  return null;
+}
+function conflictMsg(d, path) {
+  const n = labelOf(path);
+  if (d.kind === 'slot') return `「${n}」已经在槽位 ${d.i + 1} 了，不能重复添加`;
+  if (d.kind === 'del')  return `「${n}」已经是「丢弃」目录了`;
+  return `「${n}」是当前的待分类（源）目录，不能设为目标`;
+}
+
+function setSource(path) {
+  if (path) {
+    const d = conflictWith(path, { selfSource: true });
+    if (d) { toast(conflictMsg(d, path), 'warn', 4000); return false; }
+  }
+  S.source = path ? { path: normPath(path), name: labelOf(path) } : null;
+  scheduleSave(); renderSetup(); renderHeader();
+  return true;
+}
+function setTarget(i, path) {
+  if (path) {
+    const d = conflictWith(path, { selfSlot: i });
+    if (d) { toast(conflictMsg(d, path), 'warn', 4000); return false; }
+  }
+  S.targets[i] = path ? { path: normPath(path), name: labelOf(path) } : null;
+  scheduleSave(); renderSetup(); renderSlots();
+  return true;
+}
+function setDel(path) {
+  if (path) {
+    const d = conflictWith(path, { selfDel: true });
+    if (d) {
+      const n = labelOf(path);
+      toast(d.kind === 'slot' ? `「${n}」是槽位 ${d.i + 1} 的目标目录，不能同时当丢弃目录`
+        : `「${n}」是当前的待分类（源）目录，不能当丢弃目录`, 'warn', 4000);
+      return false;
+    }
+  }
+  S.del = path ? { path: normPath(path), name: labelOf(path) } : null;
+  scheduleSave(); renderSetup();
+  return true;
+}
+
+async function refreshCounts() {
+  for (let i=0;i<SLOT_N;i++) {
+    const t = S.targets[i]; if (!t) continue;
+    try { const l = await propfind(t.path); S.counts[t.path] = (l||[]).filter((e)=>!e.dir).length; renderSlots(); }
+    catch(e) { S.counts[t.path] = null; }
+  }
+}
+
+/* ---------------- 目录浏览器（选源 / 选槽位 / 批量勾选） ---------------- */
+function openPicker(mode, slot, from) {
+  // 起始目录：优先"上次浏览到哪"，其次源/目标的父目录，最后当前正在看的目录。
+  // 都不为空才退回根目录 —— 之前源为空时直接回 '/'，删完文件夹再选新目录就得从根找。
+  let start;
+  if (mode === 'source')      start = S.source ? parentOf(S.source.path) : (S.cwd || '/');
+  else if (mode === 'del')    start = S.del ? parentOf(S.del.path) : (S.cwd || '/');
+  else                        start = (S.targets[slot] ? parentOf(S.targets[slot].path) : (S.cwd || '/'));
+  const fallback = start;
+  if (S.lastPickDir) start = S.lastPickDir;
+
+  S.pick = { mode, slot, dir: start, chosen: new Set(), from: from || 'main' };
+  $('setupSheet').classList.remove('on');
+  $('browseSheet').classList.add('on');
+  renderPickerFoot();
+  pickerLoad(start, fallback);
+}
+
+function renderPickerFoot() {
+  const m = S.pick.mode;
+  $('browseTitle').textContent = m === 'batch' ? '批量勾选子目录' : m === 'source' ? '选择「待分类」目录' : m === 'del' ? '选择「丢弃」目录' : `选择槽位 ${S.pick.slot+1} 的目录`;
+  const foot = $('bFoot');
+  if (m === 'batch') {
+    foot.innerHTML = '';
+    const all = document.createElement('button'); all.className='btn ghost'; all.textContent='全选';
+    all.onclick = () => { pickerCurrentDirs().forEach((d)=>S.pick.chosen.add(d.href)); renderPickerList(); renderPickerFoot(); };
+    const none = document.createElement('button'); none.className='btn ghost'; none.textContent='清空';
+    none.onclick = () => { S.pick.chosen.clear(); renderPickerList(); renderPickerFoot(); };
+    const add = document.createElement('button'); add.className='btn primary';
+    add.textContent = `添加到空槽位 (${S.pick.chosen.size})`;
+    add.disabled = S.pick.chosen.size === 0;
+    add.onclick = applyBatch;
+    foot.append(all, none, add);
+  } else {
+    foot.innerHTML = '';
+    const cancel = document.createElement('button'); cancel.className='btn ghost'; cancel.textContent='取消';
+    cancel.onclick = () => $('browseSheet').classList.remove('on');
+    const ok = document.createElement('button'); ok.className='btn primary'; ok.textContent='选定此目录';
+    ok.onclick = () => { commitPick(S.pick.dir); };
+    foot.append(cancel, ok);
+    if (m === 'slot') {
+      const batch = document.createElement('button'); batch.className='btn'; batch.textContent='☑ 批量';
+      batch.onclick = () => { S.pick = { mode:'batch', slot:-1, dir:S.pick.dir, chosen:new Set(), from:S.pick.from }; renderPickerFoot(); pickerLoad(S.pick.dir); };
+      foot.insertBefore(batch, ok);
+    }
+  }
+}
+
+let pickerDirs = [];
+const pickerCurrentDirs = () => pickerDirs;
+
+async function pickerLoad(dir, fallback) {
+  S.pick.dir = dir.endsWith('/') ? dir : dir + '/';
+  // 面包屑只标注"当前在哪个卷"；跨卷提示已按需求去掉
+  // （两个卷实际在同一块磁盘上，rename / 硬链接本就能成功，那提示只是噪音）
+  $('bCrumb').innerHTML = esc(dec(S.pick.dir))
+    + `<span class="pool same">${esc(poolOf(S.pick.dir))}</span>`;
+  $('bHint').innerHTML = S.pick.mode === 'batch'
+    ? '勾选下面这些子目录，然后点右下角一次加入空槽位。也可以先进到更深的目录再勾。'
+    : '点一行进入该目录；也可以直接点「选它」把那个子目录选走。';
+  const box = $('bList');
+  box.innerHTML = '<div class="note">载入中…</div>';
+  try {
+    const list = await listDirs(S.pick.dir);
+    if (list === null) {                        // 404：这个目录已经不在了（例如上次浏览的目录刚被删掉）
+      if (fallback && fallback !== S.pick.dir) return pickerLoad(fallback);
+      pickerDirs = [];
+      box.innerHTML = '<div class="note">这个目录已经不存在了，点上面的 ↑ 换个地方</div>';
+      renderPickerFoot();
+      return;
+    }
+    pickerDirs = list;
+    S.lastPickDir = S.pick.dir;                 // 记住浏览位置，下次打开直接落在这里
+    renderPickerList();
+  } catch (e) {
+    box.innerHTML = `<div class="note" style="color:#f85149">${esc(e.message)}</div>`;
+  }
+  renderPickerFoot();
+}
+
+function renderPickerList() {
+  const box = $('bList'); box.innerHTML = '';
+  const batch = S.pick.mode === 'batch';
+  if (!pickerDirs.length) {
+    box.innerHTML = '<div class="note">这个目录下没有子目录<br>（可以点上面的 ↑ 回上一层）</div>';
+    if (batch) updateBatchHint();
+    return;
+  }
+  pickerDirs.forEach((d) => {
+    const on = batch && S.pick.chosen.has(d.href);
+    const row = document.createElement('div');
+    row.className = 'item' + (on ? ' on' : '');
+
+    if (batch) {
+      // 左侧方框：只有点它才是「选中/取消」
+      const ck = document.createElement('button');
+      ck.type = 'button';
+      ck.className = 'ck' + (on ? ' on' : '');
+      ck.textContent = on ? '✓' : '';
+      ck.setAttribute('aria-label', on ? '取消选择' : '选择');
+      ck.onclick = (e) => { e.stopPropagation(); toggleChosen(d.href); };
+      row.append(ck);
+    } else {
+      const ico = document.createElement('span');
+      ico.className = 'idx'; ico.textContent = '📁';
+      row.append(ico);
+    }
+
+    const txt = document.createElement('span');
+    txt.className = 'txt';
+    txt.innerHTML = `<b>${esc(d.name)}</b><span>${esc(dec(d.href))}</span>`;
+    row.append(txt);
+
+    if (batch) {
+      const chev = document.createElement('span');
+      chev.className = 'chev'; chev.textContent = '›';
+      row.append(chev);
+    } else {
+      const acts = document.createElement('span'); acts.className = 'acts';
+      const pick = document.createElement('button');
+      pick.className = 'btn'; pick.textContent = '选它';
+      pick.onclick = (e) => { e.stopPropagation(); commitPick(d.href); };
+      acts.append(pick);
+      row.append(acts);
+    }
+
+    // 点这一行（名字区域）＝进入该目录 —— 批量模式下也一样
+    row.onclick = () => pickerLoad(d.href);
+    box.append(row);
+  });
+  if (batch) updateBatchHint();
+}
+
+function toggleChosen(href) {
+  S.pick.chosen.has(href) ? S.pick.chosen.delete(href) : S.pick.chosen.add(href);
+  renderPickerList(); renderPickerFoot();
+}
+
+/** 批量模式：把"已选 N 个"写在提示行上，边勾边看得见 */
+function updateBatchHint() {
+  const n = S.pick.chosen.size;
+  $('bHint').innerHTML = `已选 <b style="color:#4c9aff">${n}</b> 个 —— `
+    + `点一行＝<b>进入</b>该目录，勾选请点每行<b>左边的方框</b>。`
+    + (n ? ' 选好后点右下角一次加入空槽位。' : '');
+}
+
+function commitPick(path) {
+  if (!path) { toast('请先进入一个目录', 'warn'); return; }
+  const m = S.pick.mode, from = S.pick.from;
+  if (m === 'source') setSource(path);
+  else if (m === 'del') setDel(path);
+  else if (m === 'slot') setTarget(S.pick.slot, path);
+  $('browseSheet').classList.remove('on');
+  // 从主界面进来选源目录的：选完直接回主界面，不要把设置面板顶出来
+  if (from === 'setup') $('setupSheet').classList.add('on');
+  renderSetup(); renderSlots();
+  if (m === 'source') { S.index = 0; openSource(path); }
+  refreshCounts();
+  toast('已设置（正在保存到 NAS…）', 'ok', 1600);
+}
+
+function applyBatch() {
+  const chosen = Array.from(S.pick.chosen);
+  if (!chosen.length) return;
+  const existing = new Set(S.targets.filter(Boolean).map((t)=>normPath(t.path)));
+  // 源目录与丢弃目录不能同时当目标（会"移进自己"），批量添加也要挡住
+  const blocked = new Set();
+  if (S.source && S.source.path) blocked.add(normPath(S.source.path));
+  if (S.del && S.del.path) blocked.add(normPath(S.del.path));
+  let added = 0, dup = 0, full = 0, conflict = 0;
+  for (const href of chosen) {
+    const p2 = normPath(href);
+    if (existing.has(p2)) { dup++; continue; }
+    if (blocked.has(p2)) { conflict++; continue; }
+    const i = S.targets.findIndex((t) => !t);
+    if (i < 0) { full++; continue; }
+    S.targets[i] = { path: p2, name: labelOf(href) };
+    existing.add(p2); added++;
+  }
+  scheduleSave(); renderSetup(); renderSlots();
+  $('browseSheet').classList.remove('on');
+  $('setupSheet').classList.add('on');
+  const bits = [`已加入 ${added} 个`];
+  if (dup) bits.push(`跳过 ${dup} 个（已在槽位里）`);
+  if (conflict) bits.push(`${conflict} 个是源目录或丢弃目录，不能当目标`);
+  if (full) bits.push(`${full} 个没地方放（${SLOT_N} 个槽位已满）`);
+  toast(bits.join('，'), full ? 'warn' : 'ok', 4000);
+  refreshCounts();
+}
+
+/* ---------------- 事件 ---------------- */
+$('srcBtn').onclick = () => openPicker('source', -1);
+$('filterChip').onclick = () => setFilter(S.filter === 'all' ? 'image' : S.filter === 'image' ? 'video' : 'all');
+['all','image','video'].forEach((k) => { const b = $('filter_' + k); if (b) b.onclick = () => setFilter(k); });
+$('autoplayBtn').onclick = () => setAutoplay(!S.autoplay);
+$('fsBtn').onclick = toggleFullscreen;
+$('autofsBtn').onclick = () => setAutoFs(!S.autoFs);
+$('undo').onclick = undo;
+$('discard').onclick = () => {
+  if (!S.del) { toast('还没设置「丢弃」目录，去 ⚙ 设置里选一个', 'warn'); openSetup(); return; }
+  classify(S.del, null);
+};
+$('setup').onclick = openSetup;
+$('swapBtn').onclick = () => {
+  S.swapMode = S.swapMode === 'slot' ? null : 'slot';
+  S.swapFirst = -1;
+  renderSetup();
+};
+$('gridOpen').onclick = openGrid;
+$('gridPrev').onclick = () => gridStep(-1);
+$('gridNext').onclick = () => gridStep(1);
+$('sortNew').onclick = () => setSort('mtime-desc');
+$('sortOld').onclick = () => setSort('mtime-asc');
+$('clearTargets').onclick = () => {
+  if (!confirm(`清空 ${SLOT_N} 个目标槽位和「丢弃」目录？\n源目录与撤销栈会保留，磁盘上的文件一个都不会动。`)) return;
+  S.targets = new Array(SLOT_N).fill(null); S.del = null;
+  scheduleSave(); renderSetup(); renderSlots();
+  toast('已清空目标（源与撤销栈保留）', 'ok');
+};
+$('batchBtn').onclick = () => openPicker('batch', -1, 'setup');
+$('fillBtn').onclick = () => {
+  if (!S.cwd) { toast('先选一个待分类目录', 'warn'); return; }
+  let n = 0, skipped = 0;
+  for (const d of S.dirs) {
+    if (S.targets.every((t)=>t)) break;
+    const p2 = normPath(d.href);
+    if (S.targets.some((t)=>t && normPath(t.path) === p2)) continue;
+    if ((S.source && normPath(S.source.path) === p2) || (S.del && normPath(S.del.path) === p2)) { skipped++; continue; }
+    const i = S.targets.findIndex((t)=>!t);
+    if (i < 0) break;
+    S.targets[i] = { path: p2, name: d.name }; n++;
+  }
+  scheduleSave(); renderSetup(); renderSlots();
+  toast(n ? `用当前目录的子目录填充了 ${n} 个空槽位` + (skipped ? `（跳过 ${skipped} 个源/丢弃目录）` : '')
+          : '没有可填充的子目录（或槽位已满）', n ? 'ok' : 'warn');
+  refreshCounts();
+};
+$('clearAll').onclick = () => {
+  if (!confirm('清空全部设置？\n（源目录、目标槽位、丢弃目录、撤销记录都会清除；磁盘上的文件一个都不会动）')) return;
+  S.source = null; S.targets = new Array(SLOT_N).fill(null); S.del = null; S.undoStack = [];
+  S.cwd = null; S.raw = []; S.files = []; S.index = 0; S.entryCount = 0; S.otherNames = [];
+  scheduleSave(); renderSetup(); renderSlots(); renderHeader(); render();
+  toast('已清空全部设置（磁盘文件未改动）', 'ok');
+};
+$('reloadCfg').onclick = async () => { await loadConfig(); renderSetup(); renderSlots(); renderHeader(); if (S.source) openSource(S.source.path); };
+// 槽位区滚动时更新"下面还有"的渐隐提示
+$('slotsWrap').addEventListener('scroll', updateSlotsFade, { passive: true });
+window.addEventListener('resize', updateSlotsFade);
+// 从别的 App 切回来时重新校准目标计数（与桌面版 visibilitychange 行为对齐，30 秒内不重复扫）
+let lastCountsAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - lastCountsAt < 30000) return;
+  lastCountsAt = Date.now();
+  refreshCounts();
+});
+document.querySelectorAll('[data-close]').forEach((b) => {
+  b.onclick = () => {
+    $(b.dataset.close).classList.remove('on');
+    // 只有从设置面板里打开的浏览器，取消/关闭后才回设置面板；从主界面进来的就回主界面
+    if (b.dataset.close === 'browseSheet' && S.pick.from === 'setup') $('setupSheet').classList.add('on');
+  };
+});
+
+$('bUp').onclick = () => { if (S.pick.dir !== '/') pickerLoad(parentOf(S.pick.dir)); };
+$('bHome').onclick = () => pickerLoad('/');
+$('bReload').onclick = () => pickerLoad(S.pick.dir);
+
+document.addEventListener('keydown', (e) => {
+  const on = (id) => $(id).classList.contains('on');
+  // 任何面板打开时：Esc 关闭，其余按键一律不响应。
+  // ★ 必须包含 gridSheet —— 之前漏了它，图集开着时按 1-9 会真的把文件移走。
+  if (on('gridSheet') || on('browseSheet') || on('setupSheet')) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (on('browseSheet')) {
+        $('browseSheet').classList.remove('on');
+        if (S.pick.from === 'setup') $('setupSheet').classList.add('on');
+      } else if (on('gridSheet')) {
+        $('gridSheet').classList.remove('on');
+      } else if (on('setupSheet')) {
+        $('setupSheet').classList.remove('on');
+      }
+    }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }   // metaKey 兼顾 macOS
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); if (S.index < S.files.length-1) { S.index++; renderStage(); renderFilm(); preload(); } }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); if (S.index > 0) { S.index--; renderStage(); renderFilm(); preload(); } }
+  else if (/^[1-9]$/.test(e.key)) { const t = S.targets[Number(e.key)-1]; if (t) classify(t, document.querySelector(`.slot[data-slot="${Number(e.key)-1}"]`)); }
+});
+
+/* ---------------- 启动 ---------------- */
+(async function boot() {
+  // 先用浏览器缓存（配置 + 媒体类型）瞬间渲染，再以 NAS 上的配置为准
+  try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
+  try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
+  try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}
+  try { if (localStorage.getItem(AUTOFS_LS) === '1') S.autoFs = true; } catch(e){}
+  try { const ls = localStorage.getItem(SORT_LS); if (ls) S.sortMode = ls; } catch(e){}
+  buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
+  updateFilterUI();
+  updateAutoplayUI();
+  updateSortUI();
+  updateFsUI();
+  renderSlots(); renderHeader();
+  await loadConfig();
+  renderSlots(); renderHeader();
+  const start = (S.source && S.source.path) || DIR;
+  await openSource(start);
+  armAutoFs();          // 开了自动全屏的话：等用户进入页面后的第一次点按
+  refreshCounts();
+})();
+</script>
+</body>
+</html>

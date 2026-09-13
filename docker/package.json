@@ -1,0 +1,19 @@
+{
+  "name": "snap-archive",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Snap Archive 的 Docker 版：在 NAS 已有的 DSH 容器里跑一个独立 node 服务，直接读写容器内已挂载的照片卷",
+  "main": "server.mjs",
+  "exports": {
+    ".": "./server.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test-api.mjs"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}
