@@ -59,11 +59,29 @@ server.on('error', (e) => {
   process.exit(1)
 })
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   console.log(`[snap-archive] 已启动  http://${HOST}:${PORT}/`)
   console.log(`[snap-archive]   SNAP_ROOTS       = ${config.roots || '(空！必须配置，否则列表里没有卷)'}`)
   console.log(`[snap-archive]   SNAP_CONFIG_FILE = ${config.configFile}`)
-  console.log(`[snap-archive] 改 src/impl.mjs 无需重启；改本文件或路由前缀需重启。`)
+
+  // 卷自检：直接请求自己的 /api/health，用真实代码路径逐个报告"这个卷到底能不能读"。
+  // 首次部署最常见的错就是路径写错 / 没挂上 —— 与其等用户点进页面看到空白，不如启动就喊出来。
+  try {
+    const h = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).json()
+    console.log('[snap-archive] ---- 卷自检 ----')
+    if (!h.roots.length) {
+      console.log('[snap-archive] [!] 一个卷都没有：SNAP_ROOTS 为空或格式不对。')
+      console.log('[snap-archive]     正确格式："名称=容器内绝对路径;名称=另一个路径"')
+    }
+    for (const v of h.roots) {
+      const bad = typeof v.entries === 'string'
+      console.log(`[snap-archive] ${bad ? '[!]' : '[ok]'} ${v.name} → ${v.path}`
+        + (bad ? `  ${v.entries}（路径不对，或这个目录没挂进容器）` : `  (${v.entries} 项)`))
+    }
+  } catch (e) {
+    console.log('[snap-archive] 卷自检失败：' + (e && e.message))
+  }
+  console.log('[snap-archive] 改 src/impl.mjs 无需重启；改本文件或路由前缀需重启。')
 })
 
 // 优雅退出：容器 stop / Ctrl-C 时先关监听，最多等 3 秒

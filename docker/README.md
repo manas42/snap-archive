@@ -81,6 +81,17 @@ sh -c "node /volume1/docker/snap-archive/server.mjs & exec dsh web"
 
 ### 5. 验证
 
+**先看启动日志里的「卷自检」**，它用真实代码路径逐个报告每个卷能不能读：
+
+```
+[snap-archive] ---- 卷自检 ----
+[snap-archive] [ok] photos → /data/photos  (1234 项)
+[snap-archive] [!] targets → /data/targets  ERROR: ENOENT（路径不对，或这个目录没挂进容器）
+```
+
+出现 `[!]` 就说明 `SNAP_ROOTS` 里那条路径在容器里不存在 —— 典型原因是宿主机路径写错、
+或者那个目录压根没挂进容器。**全部 `[ok]` 之后再往下看**（不然页面点进去只会是空的，不好定位）。
+
 ```bash
 curl http://<NAS>:8005/api/health     # 各卷路径与条目数
 ```
