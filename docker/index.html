@@ -374,12 +374,9 @@
  * ==========================================================================*/
 
 /* 后端端点：必须与 src/routes.mjs 的值一致（改前缀要两处同改）。
- * 独立服务监听自己的端口，所以直接用根路径（页面在 /，API 在 /api/*）。
- * ORIGIN 故意留空字符串 —— 下面的业务代码到处写着 `ORIGIN + 路径`，
- * 留空后它们自然退化成"虚拟路径"，于是这些调用点一行都不用动。 */
+ * 独立服务监听自己的端口，所以直接用根路径（页面在 /，API 在 /api/*）。 */
 const ROUTE = '';
 const API = ROUTE + '/api';
-const ORIGIN = '';
 const CFG_LS = 'snap.config.cache';
 const FILTER_LS = 'snap.filter';
 const AUTOPLAY_LS = 'snap.autoplay';
@@ -398,7 +395,6 @@ const extOf = (n) => { const i = n.lastIndexOf('.'); return i<0 ? '' : n.slice(i
 const baseOf = (h) => { const t = String(h).replace(/\/$/,''); return dec(t.slice(t.lastIndexOf('/')+1)); };
 const parentOf = (h) => { const p = h.replace(/\/$/,'').split('/'); p.pop(); return p.join('/')+'/'; };
 const human = (n) => n>1048576 ? (n/1048576).toFixed(1)+'MB' : n>1024 ? Math.round(n/1024)+'KB' : n+'B';
-const joinEnc = (dir, name) => dir + enc(name);
 /** 卷名 = 虚拟路径第一段（对应 WebDAV 的「挂载点」）。只用于在面包屑上标注"当前在哪个卷"。 */
 const poolOf = (p) => dec(String(p||'/').replace(/^\//,'').split('/')[0] || '/');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1599,7 +1595,7 @@ document.addEventListener('keydown', (e) => {
   renderSlots(); renderHeader();
   await loadConfig();
   renderSlots(); renderHeader();
-  const start = (S.source && S.source.path) || DIR;
+  const start = (S.source && S.source.path) || ROUTE + '/';
   await openSource(start);
   armAutoFs();          // 开了自动全屏的话：等用户进入页面后的第一次点按
   refreshCounts();

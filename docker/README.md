@@ -40,6 +40,7 @@ docker/
   index.html            页面（由 mobile/index.html 派生，网络层换成 /api/*）
   make-test-corpus.py   生成测试素材（多格式/中文名/同名冲突/分页/假视频）
   test-api.mjs          服务端行为测试（49 条断言，不需要浏览器）
+  test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，48 条断言）
 ```
 
 ## 部署
@@ -179,11 +180,22 @@ SNAP_ROOTS = "photos=/data/photos;targets=/data/targets"
 python3 docker/make-test-corpus.py
 SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
   SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
-node docker/test-api.mjs
+node docker/test-api.mjs     # 服务端：49 条断言
+node docker/test-ui.mjs      # 前端：48 条断言（需要 jsdom，见下）
 ```
 
-覆盖：中文+空格文件名、`kind` 分类、`..` 与 `..%2f` 穿越、软链逃逸、Range 206、
-同名改名不覆盖、`noRename` 冲突中止且源毫发无损、非空目录拒删、卷根拒删。
+**服务端**（`test-api.mjs`）覆盖：中文+空格文件名、`kind` 分类、`..` 与 `..%2f` 穿越、软链逃逸、
+Range 206、同名改名不覆盖、`noRename` 冲突中止且源毫发无损、非空目录拒删、卷根拒删。
+
+**前端**（`test-ui.mjs`）把 `index.html` 里那份前端 JS 真的在 [jsdom](https://github.com/jsdom/jsdom)
+里跑起来，驱动真实交互流程：启动 → 列目录 → 预览渲染 → 图集分页 → 筛选切换 → 分类移动 →
+同名改名 → 撤销 → 切目录 → 删空目录 → 配置持久化，并断言全程没有未捕获异常。
+
+> 这一类测试抓得到 API 测试与 `node --check` 都抓不到的 bug —— 例如"启动时引用了重构中被删掉的
+> 标识符"，语法完全合法、接口全部正常，但页面一打开就是白的。
+
+jsdom 是**开发依赖**（`npm i -D jsdom`），部署时不需要：服务端本身零依赖，`node server.mjs` 直接跑。
+若不想在本目录装，可在别处装好后用 `SNAP_JSDOM=/path/to/jsdom/lib/api.js node docker/test-ui.mjs`。
 
 > 目录 `docs/` 与 `tools/` 不入库（含 NAS 私有信息）；`tools/slice/` 是同一路线的只读验证原型，
 > 其中 `safeResolve` / `realWithinRoot` 的路径校验思路被本版沿用。

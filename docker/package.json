@@ -11,7 +11,12 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node test-api.mjs"
+    "test": "node test-api.mjs",
+    "test:ui": "node test-ui.mjs",
+    "test:all": "node test-api.mjs && node test-ui.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
   },
   "engines": {
     "node": ">=20.11"
