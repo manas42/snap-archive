@@ -1089,7 +1089,7 @@ async function deleteSourceDir() {
   let done = false, dropped = 0, goneName = '';
   try {
     // 以磁盘上的实时状态为准：只要还有**任何**条目（子目录、txt、隐藏文件…）就拒绝删除。
-    // 不自动搬运、不"顺手"处理非图片视频的东西 —— 宁可让人去文件管理器清干净。
+    // 不自动搬运、不"顺手"处理非图片视频的东西 —— 宁可让人去文件管理器清干净。★这道校验是唯一防线：该 NAS 对非空目录的 DELETE 会递归删掉整棵树（实测 204），服务器不兜底。
     const list = await propfind(ORIGIN + dir, 1);
     if (!list) throw new Error('目录已经不存在了');
     const entries = list.filter((e) => normPath(e.href) !== normPath(dir));
@@ -1102,7 +1102,7 @@ async function deleteSourceDir() {
     if (!confirm(`删除空目录「${S.source.name}」？\n（不可撤销；磁盘上的这个文件夹会被删掉）`)) return;
     const d = await fetch(ORIGIN + dir, { method:'DELETE', credentials:'same-origin' });
     if (d.status !== 204 && d.status !== 200)
-      throw new Error('删除目录失败 HTTP ' + d.status + '（只有空目录能删）');
+      throw new Error('删除目录失败 HTTP ' + d.status + '（本应用只允许删空目录）');
 
     // 撤销栈里"退回这个目录"的步骤已无法执行，清掉并如实告知
     const before = S.undoStack.length;
