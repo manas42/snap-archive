@@ -11,6 +11,7 @@
  */
 
 import http from 'node:http'
+import path from 'node:path'
 import { makeCorpus } from './make-test-corpus.mjs'
 
 const ROOT = process.env.SNAP_TEST_ROOT || '/tmp/snap-test'
@@ -19,6 +20,30 @@ const PORT = Number(new URL(BASE).port || 80)
 
 // 自己重建一份干净素材 —— 两个测试互不依赖对方的残留状态
 makeCorpus(ROOT)
+
+/**
+ * 安全闸：本测试会**真的移动文件**，所以必须先确认服务挂的正是本次的临时语料。
+ * 它同时把"卷名/路径对不上"这种配置错误直接说清楚 —— 否则只会得到一个
+ * "Cannot read properties of undefined" 之类的报错，完全指不到症结。
+ */
+{
+  const want = `photos=${path.join(ROOT, '待分类')};store=${ROOT}`
+  let h = null
+  try { h = await (await fetch(BASE + '/api/health')).json() } catch (e) {
+    console.error(`❌ 连不上 ${BASE}（${e.message}）\n   先起服务：\n   SNAP_ROOTS="${want}" SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs`)
+    process.exit(2)
+  }
+  const names = h.roots.map((r) => r.name)
+  const paths = h.roots.map((r) => r.path)
+  const good = names.length === 2 && names[0] === 'photos' && names[1] === 'store'
+    && paths[0] === path.join(ROOT, '待分类') && paths[1] === ROOT
+  if (!good) {
+    console.error('❌ 本测试只对临时语料运行（它会真的移动文件），当前卷配置不匹配。')
+    console.error(`   请这样起服务：SNAP_ROOTS="${want}" SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs`)
+    console.error(`   当前服务挂的是：${JSON.stringify(h.roots)}`)
+    process.exit(2)
+  }
+}
 
 let pass = 0, fail = 0
 const ok = (cond, label, extra) => {
