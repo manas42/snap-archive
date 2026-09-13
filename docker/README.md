@@ -46,42 +46,108 @@ docker/
 
 ## 部署
 
-### 1. 代码放进容器能读到的挂载卷
+两条路，选一条：
 
-把 `docker/` 整个目录拷到 NAS 上某个**已挂进 DSH 容器**的路径下（例如 `/volume1/docker/snap-archive/`）。
-放挂载卷里是"harness 能实时修"的前提。
+- **省事（推荐）**：只改一次 compose —— 把[第 4 步](#4-容器重启后自动拉起并顺便自动取代码)那段插进
+  entrypoint（`exec dsh web` 之前），它会**自己取代码、自己拉起服务**。然后重建容器即可，1~3 步都不用做。
+- **手动**：按 1 → 2 → 3 走一遍，先把服务跑起来看效果，之后再考虑接进启动流程。
+
+### 1. 把代码弄进容器（放挂载卷里）
+
+目标路径举例 `/workspace/snap-archive/` —— 必须落在**已挂进容器的卷**里，这是"harness 能实时修"的前提。
+
+```sh
+git clone --depth 1 https://github.com/manas42/snap-archive.git /workspace/snap-archive
+```
+
+拉不动时的**实测可用**备选（本机验证：三种都能下到 176483 字节的有效 gzip、解出 `snap-archive-main/`）：
+
+```sh
+# ① 走代理 clone —— 保留 .git，之后还能 git pull 更新
+git clone --depth 1 https://gh-proxy.com/https://github.com/manas42/snap-archive.git /workspace/snap-archive
+
+# ② 直连 codeload 取 tarball（不经过 github.com 域；只需 curl + tar）
+mkdir -p /workspace/snap-archive && \
+curl -fsSL https://codeload.github.com/manas42/snap-archive/tar.gz/refs/heads/main \
+  | tar xz -C /workspace/snap-archive --strip-components=1
+
+# ③ 代理取 tarball
+mkdir -p /workspace/snap-archive && \
+curl -fsSL https://gh-proxy.com/https://github.com/manas42/snap-archive/archive/refs/heads/main.tar.gz \
+  | tar xz -C /workspace/snap-archive --strip-components=1
+```
+
+> 容器里没有 `git` 就先 `apt-get install -y git`，或直接用 ②③（只需要 curl + tar）。
+> 嫌麻烦可以跳过这一步 —— 下面第 4 步的 entrypoint 会自己取。
 
 ### 2. 起服务
 
 ```bash
 SNAP_ROOTS="photos=/data/photos;targets=/data/targets" \
   PORT=8005 \
-  node /volume1/docker/snap-archive/server.mjs
+  node /workspace/snap-archive/docker/server.mjs
 ```
 
-### 3. 端口映射
+### 3. 端口（`network_mode: host` 下不需要任何映射）
 
-给 DSH 容器加一条 `8005:8005` 的端口映射（你已经预留了 8005）。
+容器若是 `network_mode: host`，**不要写 `ports`** —— Docker 会直接丢弃映射并打警告。
+进程监听 `0.0.0.0:8005` 就已经在局域网可达（`HOST` 默认就是 `0.0.0.0`）。
+只有用 bridge 网络时才需要加一条 `8005:8005`。
 
-### 4. 容器重启后自动拉起
+### 4. 容器重启后自动拉起（并顺便自动取代码）
 
-独立进程需要自己保证"容器起来它也跟着起来"。按你的容器启动方式选一种：
+独立进程得自己保证"容器起来它也跟着起来"。**如果容器 command 是一段 entrypoint 脚本**
+（例如 `bash -c` 一大段脚本、最后 `exec dsh web`），把下面这段插到 `exec dsh web` **之前**即可 ——
+它一次解决「取代码」和「拉起来」两件事，于是你只需要改一次 compose、重建一次容器：
 
-**A. 容器 command 是 `dsh web`（或类似单命令）** —— 改成并行拉起：
+```yaml
+        # 5.5) 首次启动自动取代码（之后代码留在卷里；改代码 = 改文件，刷新即生效）
+        if [ ! -f /workspace/snap-archive/docker/server.mjs ]; then
+          echo "[snap] 首次启动：正在获取 Snap Archive 代码..."
+          command -v git >/dev/null 2>&1 || apt-get install -y -qq git >/dev/null 2>&1 || true
+          git clone --depth 1 https://github.com/manas42/snap-archive.git /workspace/snap-archive >/dev/null 2>&1 \
+            || git clone --depth 1 https://gh-proxy.com/https://github.com/manas42/snap-archive.git /workspace/snap-archive >/dev/null 2>&1 \
+            || true
+          # 兜底：没有 git 或 clone 失败 → 用 tarball（只需 curl + tar）
+          if [ ! -f /workspace/snap-archive/docker/server.mjs ]; then
+            rm -rf /workspace/snap-archive
+            mkdir -p /workspace/snap-archive
+            curl -fsSL https://codeload.github.com/manas42/snap-archive/tar.gz/refs/heads/main 2>/dev/null \
+              | tar xz -C /workspace/snap-archive --strip-components=1 2>/dev/null || true
+          fi
+        fi
+
+        # 5.6) 启动 Snap Archive（独立 node 服务；host 网络下监听 0.0.0.0:8005 即可局域网访问）
+        if [ -f /workspace/snap-archive/docker/server.mjs ]; then
+          SNAP_ROOTS="photos=/data/photos;targets=/data/targets" \
+          SNAP_CONFIG_FILE=/dsh/data/snap-archive/config.json \
+          PORT=8005 \
+          nohup node /workspace/snap-archive/docker/server.mjs >/dsh/snap-archive.log 2>&1 &
+          echo "[ok] Snap Archive 已拉起（容器内 8005，host 网络直接访问；日志 /dsh/snap-archive.log）"
+        else
+          echo "[!] 代码没取到，Snap Archive 未启动 —— 可手动 git clone 到 /workspace/snap-archive"
+        fi
+```
+
+把路径与 `SNAP_ROOTS` 换成你自己的。这段**在真实 compose 上验证过**：
+
+- YAML 能解析、抽出的 shell 通过 `bash -n`
+- 插入段不含裸露 `$`，不会被 compose 插值吃掉
+- ★ 在 `set -e` 之下、把 `git`/`curl` 换成必定失败的命令实测：entrypoint **不会被中断**，
+  照常打印 `[!] 代码没取到` 并继续走到 `exec dsh web` —— 这点最关键，否则"取代码失败"会把
+  整个 DSH 一起拖得起不来
+
+**A. 容器 command 只是单命令**（如 `dsh web`）—— 改成并行拉起：
 
 ```sh
 sh -c "node /volume1/docker/snap-archive/server.mjs & exec dsh web"
 ```
 
-**B. 有 entrypoint 脚本** —— 在脚本里 `nohup node /volume1/docker/snap-archive/server.mjs >/tmp/snap.log 2>&1 &`，
-再接原来的 `exec`。放在 `exec` 之前即可（后台进程不会因为 `exec` 替换 shell 而消失）。
-
-> compose 会插值 `$`，所以脚本里的 shell 变量要写成 `$$` —— 但上面这条启动命令本身不含
-> shell 变量，原样贴进去就行。（给 `SNAP_ROOTS` 赋值时的 `;` 在引号内是安全的。）
-
 **C. 用进程管理器**（s6-overlay / supervisord）—— 加一个 program 段落，最正规。
 
-> 先别急着改成常驻：可以按第 2 步手动起一次，确认能用之后再接到启动流程里。
+> compose 会插值 `$`，脚本里的 shell 变量要写成 `$$`；上面那段本身不含 shell 变量，原样贴即可
+> （`SNAP_ROOTS` 赋值里的 `;` 在引号内是安全的）。
+> 想先确认服务本身没问题，也可以按第 2 步手动起一次再接进启动流程。
 
 ### 5. 验证
 
