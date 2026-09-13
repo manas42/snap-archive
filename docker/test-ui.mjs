@@ -94,12 +94,16 @@ const html = await readFile(INDEX, 'utf8')
 
 // 把需要的内部绑定导出成 globalThis.__snap（追加在最后一个 </script> 之前，处在同一作用域）
 const tail = `
-;globalThis.__snap = { S, openSource, classify, undo, deleteSourceDir, setFilter, goToDir,
-  propfind, place, render, renderStage, renderFilm, buildFiles, sortRaw,
+;globalThis.__snap = { S, B, PAGE, openSource, classify, undo, deleteSourceDir, setFilter, goToDir,
+  propfind, place, render, renderStage, renderFilm, buildFiles, sortRaw, renderBadge,
   normPath, canDeleteSource, labelOf, openGrid, renderGrid, loadConfig, saveConfig,
   openPicker, pickerLoad, commitPick, toggleChosen, applyBatch, setSort, openSetup, renderSetup,
   doSwapSlots, doSwapSourceWithSlot, gridStep, setAutoplay, toggleFullscreen, setAutoFs,
-  setSource, setTarget, setDel, refreshCounts, conflictWith, updateSortUI };
+  setSource, setTarget, setDel, refreshCounts, conflictWith, updateSortUI,
+  // 本次新增：页面切换 / 浏览页设置 / 幻灯片 / 详情药丸
+  showPage, pageFromHash, setAutoSlide, setRandom, setVideoLoop, updateBrowseCfgUI,
+  updateSlideUI, browseLoad, browseBuild, nextIndex, browseNext, browseGoto, renderBrowse,
+  stepInterval, renderBrowseBadge };
 `
 const cut = html.lastIndexOf('</script>')
 const patched = html.slice(0, cut) + tail + html.slice(cut)
@@ -139,6 +143,10 @@ window.addEventListener('error', (e) => jsdomErrors.push(String(e.message || e.e
 
 const app = await until(() => window.__snap, '前端脚本挂载 globalThis.__snap')
 const { S } = app
+
+/** 键盘路径只对「归类」页生效（页面路由之后，菜单/浏览页的按键语义完全不同），
+ *  所以碰键盘之前先显式切到归类页 —— 否则按 1-9 不会有任何反应。 */
+const onCategorize = () => app.showPage('categorize')
 
 console.log('\n— 启动 —')
 await until(() => S.cwd, 'boot 打开起始目录')
@@ -346,12 +354,13 @@ console.log('\n— 设置面板 / 选择器 / 排序 / 互换 / 键盘（这些�
 
   // ⑧ 面板打开时键盘必须失效 —— 这是刻意的安全设计
   //   （历史上"图集开着时按数字键会真的把文件移走"，所以任何面板打开时一律不响应键盘）
+  onCategorize()                                  // 键盘路径只属于「归类」页
   window.document.getElementById('setupSheet').classList.add('on')
   S.index = 0
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight' }))
   ok(S.index === 0, '有面板打开时方向键不生效（刻意行为）', S.index)
 
-  for (const id of ['gridSheet', 'browseSheet', 'setupSheet']) {
+  for (const id of ['gridSheet', 'browseSheet', 'setupSheet', 'bCfgSheet']) {
     window.document.getElementById(id).classList.remove('on')
   }
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight' }))
@@ -370,6 +379,112 @@ console.log('\n— 设置面板 / 选择器 / 排序 / 互换 / 键盘（这些�
   await app.undo()
   ok(await exists(path.join(SRC_DIR, victim.name)), '撤销把它放回源目录')
   ok(jsdomErrors.length === 0, '键盘路径全程没有未捕获错误', jsdomErrors.slice(0, 2))
+}
+
+console.log('\n— 左上角序号药丸：默认只有序号，点开才显示类型/大小 —')
+{
+  onCategorize()
+  await app.openSource('/photos/', true)
+  await until(() => S.cwd === '/photos/' && S.files.length > 0, '归类页列表就绪')
+  app.renderStage()
+  const badge = window.document.getElementById('badge')
+  // 明细＝badge 的直接子元素（序号药丸自己是第一个，也是收起时唯一的一个）
+  const detailCount = () => badge.children.length - badge.querySelectorAll('button.seq').length
+  const btn = badge.querySelector('button.seq')
+  ok(!!btn, '序号是一个可点的药丸（不是死文字）')
+  ok(new RegExp(`第\\s*1\\s*/\\s*${S.files.length}`).test(btn ? btn.textContent : ''),
+    '药丸上写着序号', btn && btn.textContent)
+  ok(detailCount() === 0, '默认不显示类型/大小等明细（只有一个序号）', {
+    children: badge.children.length, detail: detailCount() })
+  if (btn) btn.click()
+  const texts = [...badge.children].map((s) => s.textContent)
+  ok(texts.some((t) => /图片|视频/.test(t)), '点开后出现文件类型', texts)
+  ok(texts.some((t) => /^\d+(\.\d+)?(B|KB|MB)$/.test(t)), '点开后出现文件大小', texts)
+  const btn2 = badge.querySelector('button.seq')
+  if (btn2) btn2.click()
+  ok(detailCount() === 0, '再点一下又收起来', detailCount())
+  ok(jsdomErrors.length === 0, '序号药丸切换没有未捕获错误', jsdomErrors.slice(0, 2))
+}
+
+console.log('\n— 首页 ⚙「浏览设置」：幻灯片 / 随机 / 视频自动播放 —')
+{
+  app.showPage('menu')
+  const cfg = window.document.getElementById('bCfgSheet')
+  window.document.getElementById('menuCfg').click()
+  ok(cfg.classList.contains('on'), '首页的 ⚙ 能打开浏览设置面板')
+  ok(!!window.document.getElementById('bCfgAuto') && !!window.document.getElementById('bCfgIntVal')
+    && !!window.document.getElementById('bCfgRand') && !!window.document.getElementById('bCfgVideo'),
+    '幻灯片自动播放 / 间隔 / 随机 / 视频自动播放 都在面板里')
+
+  app.setAutoSlide(false)
+  ok(app.B.autoSlide === false, '幻灯片自动播放可关闭', app.B.autoSlide)
+  ok(window.document.getElementById('bCfgAuto').textContent === '关', '面板按钮同步显示"关"')
+  ok(app.B.slide === false, '关掉自动播放后不会再把幻灯片开关当成开着')
+  app.setAutoSlide(true)
+  ok(app.B.autoSlide === true && app.B.slide === true, '再打开就恢复自动播放')
+
+  app.setRandom(false)
+  ok(app.B.random === false, '随机播放可关闭')
+  const i0 = 3
+  app.B.files = [{ name: 'a.jpg' }, { name: 'b.jpg' }, { name: 'c.jpg' }, { name: 'd.jpg' }]
+  app.B.random = false
+  ok(app.nextIndex(i0) === 0, '顺序模式：最后一张的下一张回到第一张（不打乱）', app.nextIndex(i0))
+  ok(app.nextIndex(1) === 2, '顺序模式：中间就是老老实实 +1', app.nextIndex(1))
+  app.B.random = true
+  ok([0, 1, 3].includes(app.nextIndex(2)) && app.nextIndex(2) !== 2,
+    '随机模式：绝不会连续两次抽到同一张', app.nextIndex(2))
+  app.setRandom(true)
+
+  app.setVideoLoop(true)
+  ok(app.B.videoLoop === true, '视频循环可打开')
+  app.setVideoLoop(false)
+
+  const iSec = Math.round(app.B.interval / 1000)
+  window.document.getElementById('bCfgIntUp').click()
+  ok(Math.round(app.B.interval / 1000) !== iSec, '面板里能调图片间隔',
+    { was: iSec, now: Math.round(app.B.interval / 1000) })
+  ok(window.document.getElementById('bCfgIntVal').textContent === `${Math.round(app.B.interval / 1000)}s`,
+    '间隔按钮上的数字跟着变', window.document.getElementById('bCfgIntVal').textContent)
+
+  // 视频自动播放：与归类页共用同一个值
+  app.setAutoplay(false)
+  ok(app.B.videoAuto === false, '关掉"视频自动播放"会同步到浏览页', app.B.videoAuto)
+  app.setAutoplay(true)
+  ok(app.B.videoAuto === true, '打开也一样同步')
+  cfg.classList.remove('on')
+  ok(jsdomErrors.length === 0, '浏览设置面板操作没有未捕获错误', jsdomErrors.slice(0, 2))
+}
+
+console.log('\n— 浏览页：随机到视频应当自动播放 —')
+{
+  app.B.dirs = [{ path: '/photos/', name: '待分类' }]
+  app.B.loaded = false
+  await app.browseLoad()
+  await until(() => app.B.files.length > 0, '浏览页扫到媒体')
+  const vi = app.B.files.findIndex((f) => f.name.endsWith('.mp4'))
+  ok(vi >= 0, '浏览列表里有那个视频', vi)
+  app.setAutoSlide(false)                 // 先关掉幻灯片，确保测的是"手动/随机翻到视频"
+  app.setAutoplay(true)
+  app.browseGoto(vi)
+  const st = window.document.getElementById('bStage')
+  const v = st.querySelector('video')
+  ok(!!v, '视频被渲染到浏览页舞台上')
+  ok(v && v.autoplay === true, '视频元素带着 autoplay（随机到视频会自动开始）', v && v.autoplay)
+  ok(v && v.loop === app.B.videoLoop, '视频元素的 loop 跟随"视频循环"设置', v && v.loop)
+  ok(!st.classList.contains('clickable'), '视频页面上点画面＝播放/暂停，不劫持成翻页')
+  app.setVideoLoop(true); app.browseGoto(vi)
+  const v2 = window.document.getElementById('bStage').querySelector('video')
+  ok(v2 && v2.loop === true, '打开循环后视频元素立刻变成 loop', v2 && v2.loop)
+  app.setVideoLoop(false)
+  app.setAutoplay(false)
+  app.browseGoto(vi)
+  const v3 = window.document.getElementById('bStage').querySelector('video')
+  ok(v3 && v3.autoplay === false, '关掉"视频自动播放"后不再 autoplay', v3 && v3.autoplay)
+  app.setAutoplay(true)
+  app.B.dirs = []
+  app.B.loaded = false
+  onCategorize()
+  ok(jsdomErrors.length === 0, '浏览页自动播放路径没有未捕获错误', jsdomErrors.slice(0, 2))
 }
 
 console.log('\n— 全程无未捕获错误 —')

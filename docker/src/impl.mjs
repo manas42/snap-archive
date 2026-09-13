@@ -42,6 +42,14 @@ const MIME = {
 
 const extOf = (n) => { const i = n.lastIndexOf('.'); return i < 0 ? '' : n.slice(i + 1).toLowerCase() }
 
+/** 把查询参数收敛成一个安全的整数（缺省/非数字/超范围都退回默认值）。 */
+const clampInt = (v, lo, hi, dflt) => {
+  if (v === null || v === undefined || v === '') return dflt
+  const n = Number(v)
+  if (!Number.isFinite(n)) return dflt
+  return Math.min(hi, Math.max(lo, Math.floor(n)))
+}
+
 /** 逐段百分号编码（保留 / 分隔），中文/空格/emoji 目录名都能安全进 URL。 */
 const encVPath = (vp) => String(vp).split('/').map(encodeURIComponent).join('/')
 
@@ -204,6 +212,82 @@ async function listEntries(roots, vp) {
     })
   }
   return out
+}
+
+/**
+ * 递归列出目录下的**全部媒体文件**（供「浏览」页用：一次选中多个文件夹、含子文件夹）。
+ *
+ * 与 listEntries 的分工：
+ *   · listEntries（默认，非递归）—— 「归类」页的语义，目录里有什么就列什么，条目形状完全不变；
+ *   · 本函数（recursive=1）—— 只返回 image/video 文件，`href` 是完整虚拟路径（含子目录段），
+ *     所以前端 parentOf/labelOf 能直接算出"这张在哪个子文件夹"。
+ *
+ * 三道刹车，避免在大目录树上把内存/带宽吃光：
+ *   · maxDepth 限层（默认 16，最大 32）；
+ *   · limit 限条数（默认 20000），到顶就停下并回 truncated=true，前端据此提示；
+ *   · 目录名以 . 开头的直接跳过（NAS 上那些 .通过samba删除的文件 之类不该被翻出来）。
+ * 单层用 8 路并发 readdir：BNF 式逐个等串行太慢，全量 Promise.all 又可能撞上 fd 上限。
+ * 软链：仍要求 realpath 落在卷根内（与 listEntries 一致），并用 realpath 去重防环。
+ */
+async function listEntriesDeep(roots, vp, opts) {
+  const loc = await locate(roots, vp)
+  if (!loc) throw badPath('不能递归列出卷根，请先选择一个文件夹')
+  await assertInside(loc)
+
+  const maxDepth = clampInt(opts && opts.maxDepth, 0, 32, 16)
+  const limit = clampInt(opts && opts.limit, 1, 50000, 20000)
+
+  const out = []
+  const seen = new Set()            // 已访问目录的 realpath —— 软链成环时靠它跳出
+  const queue = [{ abs: loc.abs, rel: loc.rel, depth: 0 }]
+  let dirs = 0
+  let truncated = false
+
+  while (queue.length && !truncated) {
+    const batch = queue.splice(0, 8)
+    const results = await Promise.all(batch.map(async (item) => {
+      let real
+      try { real = await fsp.realpath(item.abs) } catch { return null }
+      if (real !== loc.base && !real.startsWith(loc.base + path.sep)) return null   // 软链逃出卷根
+      if (seen.has(real)) return null
+      seen.add(real)
+      try { return { item, entries: await fsp.readdir(item.abs, { withFileTypes: true }) } }
+      catch { return null }        // 单个目录读不动（权限/竞态）：跳过，别让整个请求失败
+    }))
+
+    for (const r of results) {
+      if (!r) continue
+      dirs++
+      for (const e of r.entries) {
+        if (out.length >= limit) { truncated = true; break }
+        if (e.name.startsWith('.')) continue
+        const childAbs = path.join(r.item.abs, e.name)
+        let st
+        try { st = await fsp.lstat(childAbs) } catch { continue }   // 断链或竞态：跳过
+        if (st.isSymbolicLink()) {
+          let real
+          try { real = await fsp.realpath(childAbs) } catch { continue }
+          if (real !== loc.base && !real.startsWith(loc.base + path.sep)) continue
+          try { st = await fsp.stat(childAbs) } catch { continue }
+        }
+        const childRel = r.item.rel ? `${r.item.rel}/${e.name}` : e.name
+        if (st.isDirectory()) {
+          if (r.item.depth + 1 <= maxDepth) queue.push({ abs: childAbs, rel: childRel, depth: r.item.depth + 1 })
+          continue
+        }
+        const kind = IMG.has(extOf(e.name)) ? 'image' : VID.has(extOf(e.name)) ? 'video' : 'other'
+        if (kind === 'other') continue          // 浏览页只关心图片与视频：其它文件不进 JSON
+        const vchild = `/${loc.vol.name}/${childRel}`
+        out.push({
+          name: e.name, dir: false, href: vchild, url: MEDIA_BASE + encVPath(vchild),
+          size: st.size, mtime: Math.round(st.mtimeMs), kind,
+        })
+      }
+      if (truncated) break
+    }
+  }
+
+  return { entries: out, dirs, truncated, limit, maxDepth }
 }
 
 /* ============================ 移动（分类 / 撤销） ============================ */
@@ -441,6 +525,15 @@ async function handleApi(req, res, config, sub, url) {
   if (sub === '/list') {
     if (req.method !== 'GET') return json(res, 405, { error: 'use GET' }, { allow: 'GET' })
     const p = url.searchParams.get('path') || '/'
+    // recursive=1 → 「浏览」页用的递归模式：只回媒体文件，并带上子目录段
+    const rec = ['1', 'true', 'yes'].includes(String(url.searchParams.get('recursive') || '').toLowerCase())
+    if (rec) {
+      const deep = await listEntriesDeep(roots, p, {
+        maxDepth: url.searchParams.get('maxDepth'),
+        limit: url.searchParams.get('limit'),
+      })
+      return json(res, 200, { path: p, recursive: true, ...deep })
+    }
     return json(res, 200, { path: p, entries: await listEntries(roots, p) })
   }
 

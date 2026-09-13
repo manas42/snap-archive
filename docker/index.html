@@ -107,6 +107,15 @@
   .badge{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
   .badge span{background:rgba(7,10,14,.72);backdrop-filter:blur(6px);border:1px solid var(--line-soft);
     border-radius:20px;padding:4px 10px;font-size:11px;color:var(--dim)}
+  /* 序号药丸：默认只显示"第 N / 总数"，点一下才展开类型、大小、剩余等明细 */
+  .badge button.seq{pointer-events:auto;display:inline-flex;align-items:center;gap:5px;
+    min-height:28px;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;color:var(--fg);
+    background:rgba(7,10,14,.72);backdrop-filter:blur(6px);border:1px solid var(--line-soft);
+    transition:transform .08s ease,filter .12s ease}
+  .badge button.seq:active{transform:scale(.95);filter:brightness(1.2)}
+  .badge button.seq .cv{font-size:9px;line-height:1;color:var(--dim-2)}
+  .badge button.seq.on{border-color:var(--acc);color:var(--acc)}
+  .badge button.seq.on .cv{color:var(--acc)}
 
   .film{flex:0 0 auto;display:flex;gap:6px;overflow-x:auto;padding:7px 8px;border-top:1px solid var(--line-soft);
     scrollbar-width:none}
@@ -172,6 +181,7 @@
   .card > h2{margin:0;padding:14px 16px;font-size:15px;display:flex;align-items:center;gap:10px;
     border-bottom:1px solid var(--line-soft)}
   .card > h2 .sp{flex:1}
+  header .sp{flex:1}
   .card .body{flex:1;min-height:0;overflow-y:auto;padding:12px 14px;-webkit-overflow-scrolling:touch}
   .card .foot{flex:0 0 auto;display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
     border-top:1px solid var(--line-soft)}
@@ -225,11 +235,144 @@
   .gcell.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(76,154,255,.5)}
   .gcell .v{position:absolute;right:3px;bottom:3px;font-size:10px;background:rgba(0,0,0,.65);border-radius:4px;padding:0 3px}
   .gcell .d{position:absolute;left:3px;top:3px;font-size:9px;background:rgba(0,0,0,.6);border-radius:4px;padding:0 4px;color:var(--dim)}
+  .gcell .f{position:absolute;left:3px;bottom:3px;max-width:calc(100% - 6px);font-size:9px;
+    background:rgba(0,0,0,.62);border-radius:4px;padding:0 4px;color:#c9d4e0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ---------- 页面容器：菜单 / 浏览 / 归类 / 去重 ---------- */
+  .page{display:none;flex:1;min-height:0;flex-direction:column}
+  .page.on{display:flex}
+  .page .soonwrap{flex:1;min-height:0}
+  .hdrbtn.back{font-size:19px;font-weight:700}
+
+  /* ---------- 菜单页（三选一） ---------- */
+  .menu-inner{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;justify-content:center;gap:20px;
+    width:100%;max-width:520px;margin:0 auto;
+    padding:calc(22px + env(safe-area-inset-top)) 20px calc(22px + env(safe-area-inset-bottom))}
+  .menu-hero{text-align:center}
+  .menu-hero .big{font-size:44px;display:block;margin-bottom:6px;opacity:.9}
+  .menu-hero h1{margin:0;font-size:23px;letter-spacing:1px}
+  .menu-hero p{margin:7px 0 0;font-size:12px;color:var(--dim-2)}
+  .menu-list{display:flex;flex-direction:column;gap:11px}
+  .mcard{display:flex;align-items:center;gap:14px;text-align:left;padding:17px 16px;border-radius:var(--r);
+    background:linear-gradient(180deg,var(--panel-3),var(--panel));border:1px solid var(--line);box-shadow:var(--shadow);
+    transition:transform .08s ease,filter .15s ease,border-color .15s ease}
+  .mcard:active{transform:scale(.975);filter:brightness(1.15)}
+  .mcard .mi{flex:0 0 auto;font-size:25px;line-height:1}
+  .mcard .mt{flex:1;min-width:0}
+  .mcard .mt b{display:block;font-size:16.5px;letter-spacing:.4px}
+  .mcard .mt span{display:block;font-size:11.5px;color:var(--dim-2);margin-top:3px}
+  .mcard .mch{flex:0 0 auto;color:var(--dim-2);font-size:22px;line-height:1}
+  .mcard.soon{opacity:.62}
+  .tag{flex:0 0 auto;font-size:10px;color:var(--warn);border:1px solid #5c4a1d;border-radius:20px;padding:2px 8px}
+
+  /* ---------- 去重（占位） ---------- */
+  .soonwrap{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+    text-align:center;padding:24px;color:var(--dim)}
+  .soonwrap .big{font-size:44px;opacity:.75}
+  .soonwrap b{font-size:17px;color:var(--fg)}
+  .soonwrap p{margin:0;font-size:12.5px;color:var(--dim-2);line-height:1.9;max-width:420px}
+
+  /* ---------- 浏览页：底部条（视频上一/下一个、幻灯片间隔） ---------- */
+  .stage.clickable{cursor:pointer}
+  .vbar,.slidebar{flex:0 0 auto;gap:8px;align-items:center;flex-wrap:wrap;
+    padding:8px calc(10px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+    border-top:1px solid var(--line-soft);background:rgba(11,15,20,.85);backdrop-filter:blur(12px)}
+  .vbar{display:none}   .vbar.on{display:flex}
+  .slidebar{display:none} .slidebar.on{display:flex}
+  .vbar .btn{flex:1;max-width:240px}
+  .slidebar .btn{flex:0 0 auto}
+  .slidebar .slbl{flex:1;min-width:60px;text-align:right;font-size:11.5px;color:var(--dim-2);white-space:nowrap}
+  .slidebar .sval{flex:0 0 auto;min-width:42px;text-align:center;font-size:14px;font-weight:700;color:var(--acc)}
 </style>
 </head>
 <body>
 
+<!-- ============ 菜单：三选一入口 ============ -->
+<div class="page on" id="pageMenu">
+  <header>
+    <span class="brand"><span class="dot"></span><b>Snap Archive</b></span>
+    <span class="sp"></span>
+    <button class="hdrbtn" id="menuCfg" title="浏览设置（幻灯片 / 随机 / 视频自动播放）">⚙</button>
+  </header>
+  <div class="menu-inner">
+    <div class="menu-hero">
+      <span class="big">🗂️</span>
+      <h1>Snap Archive</h1>
+      <p>选一个入口</p>
+    </div>
+    <div class="menu-list">
+      <button class="mcard" data-page="browse">
+        <span class="mi">🖼️</span>
+        <span class="mt"><b>浏览</b><span>随机翻看图片与视频，可多选文件夹</span></span>
+        <span class="mch">›</span>
+      </button>
+      <button class="mcard" data-page="categorize">
+        <span class="mi">🗂️</span>
+        <span class="mt"><b>归类</b><span>把待分类目录里的文件移进目标目录</span></span>
+        <span class="mch">›</span>
+      </button>
+      <button class="mcard soon" data-page="dedupe">
+        <span class="mi">🧬</span>
+        <span class="mt"><b>去重</b><span>查找并清理重复的图片与视频</span></span>
+        <span class="tag">开发中</span>
+        <span class="mch">›</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 去重（占位） ============ -->
+<div class="page" id="pageDedupe">
+  <header>
+    <button class="hdrbtn back" id="dedupeMenu" title="返回菜单">←</button>
+    <span class="brand"><span class="dot"></span><b>去重</b></span>
+  </header>
+  <div class="soonwrap">
+    <span class="big">🧬</span>
+    <b>去重 · 开发中</b>
+    <p>这里以后会做「找出重复的图片/视频并清理」。<br>现在先去「浏览」看片，或者去「归类」整理吧。</p>
+    <button class="btn" id="dedupeBack">← 回到菜单</button>
+  </div>
+</div>
+
+<!-- ============ 浏览：随机看图片 / 视频 ============ -->
+<div class="page" id="pageBrowse">
+  <header>
+    <button class="hdrbtn back" id="browseMenu" title="返回菜单">←</button>
+    <button class="srcbtn" id="bDirBtn" title="切换文件夹（可多选，含子文件夹）">
+      <span class="ico">📂</span>
+      <span class="t"><span class="n" id="bDirName">未选择文件夹</span><span class="p" id="bDirPath">点这里多选（含子文件夹）</span></span>
+      <span class="ico" style="opacity:.5">▾</span>
+    </button>
+    <button class="chip" id="bFilter" data-f="all" title="切换媒体类型（图片 / 视频 / 两者）">图+视</button>
+    <button class="hdrbtn" id="bSlide" title="幻灯片视图（随机播放）">▶</button>
+    <button class="hdrbtn" id="bGallery" title="画廊视图">▦</button>
+  </header>
+  <main>
+    <div class="stage" id="bStage">
+      <div class="spinner" id="bSpin"></div>
+      <div class="hint" id="bHint"></div>
+      <div class="badge" id="bBadge"></div>
+    </div>
+  </main>
+  <div class="vbar" id="bVbar">
+    <button class="btn" id="bPrev">⏮ 上一个</button>
+    <button class="btn" id="bNext">⏭ 下一个</button>
+  </div>
+  <div class="slidebar" id="bSlideBar">
+    <button class="btn" id="bSlidePause">⏸ 暂停</button>
+    <span class="slbl">图片间隔</span>
+    <button class="btn icon" id="bIntDown" title="缩短间隔">−</button>
+    <span class="sval" id="bIntVal">5s</span>
+    <button class="btn icon" id="bIntUp" title="加长间隔">＋</button>
+  </div>
+</div>
+
+<!-- ============ 归类：原有功能 ============ -->
+<div class="page" id="pageCategorize">
 <header>
+  <button class="hdrbtn back" id="catMenu" title="返回菜单">←</button>
   <button class="srcbtn" id="srcBtn">
     <span class="ico">📂</span>
     <span class="t"><span class="n" id="srcName">待分类目录</span><span class="p" id="srcPath">点这里选择</span></span>
@@ -260,6 +403,7 @@
     <button class="btn primary" id="setup">⚙ 设置</button>
   </div>
 </footer>
+</div>
 
 <!-- ============ 设置面板 ============ -->
 <div class="sheet" id="setupSheet">
@@ -334,6 +478,47 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- ============ 浏览设置（首页 ⚙ 打开）：幻灯片 / 随机 / 视频自动播放 ============ -->
+<div class="sheet" id="bCfgSheet">
+  <div class="card">
+    <h2><span>⚙ 浏览设置</span><span class="sp"></span><button class="btn ghost icon" data-close="bCfgSheet">✕</button></h2>
+    <div class="body">
+      <div class="grp">幻灯片</div>
+      <div class="item">
+        <span class="txt"><b>幻灯片自动播放</b><span>进入「浏览」页后自动开始播放：图片按下面的间隔翻页，视频放完再换下一个。</span></span>
+        <button class="btn" id="bCfgAuto">开</button>
+      </div>
+      <div class="item">
+        <span class="txt"><b>图片间隔</b><span>幻灯片里每张图片停留多久（视频不受它影响，放完才换）。</span></span>
+        <span class="acts">
+          <button class="btn icon" id="bCfgIntDown" title="缩短间隔">−</button>
+          <button class="btn" id="bCfgIntVal" style="min-width:64px">5s</button>
+          <button class="btn icon" id="bCfgIntUp" title="加长间隔">＋</button>
+        </span>
+      </div>
+      <div class="item">
+        <span class="txt"><b>随机播放</b><span>关掉＝按列表顺序往下走（仍可在画面/底部条上手动翻）。</span></span>
+        <button class="btn" id="bCfgRand">开</button>
+      </div>
+
+      <div class="grp" style="margin-top:14px">播放</div>
+      <div class="item">
+        <span class="txt"><b>视频自动播放</b><span>翻到视频就自动开始（「浏览」页与「归类」页同时生效）。手机浏览器通常要求静音才允许自动播放，被拒绝时会显示 ▶ 按钮等你点。</span></span>
+        <button class="btn" id="bCfgVideo">开</button>
+      </div>
+      <div class="item">
+        <span class="txt"><b>视频循环</b><span>循环播放视频（幻灯片模式：不因放完而跳到下一个）。</span></span>
+        <button class="btn" id="bCfgLoop">关</button>
+      </div>
+
+      <div class="note">这些设置会跟着「归类」页的配置一起存到服务端，换设备也还在。</div>
+    </div>
+    <div class="foot">
+      <button class="btn primary" data-close="bCfgSheet">完成</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 图集：分页栅格 ============ -->
 <div class="sheet" id="gridSheet">
   <div class="card">
@@ -350,6 +535,21 @@
     <div class="foot">
       <button class="btn" id="gridPrev">‹ 上一页</button>
       <button class="btn" id="gridNext">下一页 ›</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 浏览页的画廊：分页栅格 ============ -->
+<div class="sheet" id="bGalSheet">
+  <div class="card">
+    <h2><span id="bGalTitle">画廊</span><span class="sp"></span><button class="btn ghost icon" data-close="bGalSheet">✕</button></h2>
+    <div class="body">
+      <div class="ggrid" id="bGalBox"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="bGalPrev">‹ 上一页</button>
+      <span class="pag" id="bGalPage" style="flex:0 0 auto;align-self:center">— / —</span>
+      <button class="btn" id="bGalNext">下一页 ›</button>
     </div>
   </div>
 </div>
@@ -409,6 +609,65 @@ const S = {
   pick: { mode:'source', slot:-1, dir:'/', chosen:new Set() },
   dirty: false, saving: false,
 };
+
+/* ==========================================================================
+ * 页面路由：菜单（三选一） / 浏览 / 归类 / 去重
+ * --------------------------------------------------------------------------
+ * 首页只做入口；三个功能页左上角都有「← 返回菜单」。
+ * 路由走 location.hash（#/browse 之类）：刷新、加书签、浏览器后退都能停在同一页。
+ * ==========================================================================*/
+const PAGES = ['menu', 'browse', 'categorize', 'dedupe'];
+let PAGE = 'menu';
+const pageEl = (name) => $('page' + name.charAt(0).toUpperCase() + name.slice(1));
+
+function pageFromHash() {
+  const h = String(location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
+  return PAGES.includes(h) ? h : 'menu';
+}
+function showPage(name) {
+  if (!PAGES.includes(name)) name = 'menu';
+  for (const p of PAGES) {
+    const el = pageEl(p);
+    if (el) el.classList.toggle('on', p === name);
+  }
+  PAGE = name;
+  // 离开浏览页就别让幻灯片继续跑、也别在后台放视频
+  if (name === 'browse') browseEnter(); else browseStop();
+  updateFsUI();
+}
+/** 切页：哈希已经（或无法）变化时直接切，否则交给 hashchange —— 免得切两次 */
+function navTo(name) {
+  if (pageFromHash() === name) showPage(name);
+  else location.hash = '#/' + name;
+}
+const goMenu = () => navTo('menu');
+window.addEventListener('hashchange', () => showPage(pageFromHash()));
+
+/* ==========================================================================
+ * 「浏览」页状态
+ * --------------------------------------------------------------------------
+ * 与「归类」页完全解耦：归类那套 S 是"移动文件"的状态机，这里是"看片"的。
+ * dirs 可多选；raw 是递归扫到的全部媒体（唯一事实来源），files 是筛选后的可见列表。
+ * ==========================================================================*/
+const B = {
+  dirs: [],                    // 选中的文件夹 [{path,name}]（含子文件夹）
+  raw: [], files: [], index: -1,
+  history: [],                 // 「上一个」用的访问历史（点过的上一张）
+  filter: 'all',
+  // 首页 ⚙「浏览设置」里可调的四项（都会存进服务端配置）
+  autoSlide: true,             // 进浏览页就自动开始幻灯片
+  random: true,                // 幻灯片（与"没有历史时"的换一张）走随机；关掉＝按列表顺序
+  videoAuto: true,             // 翻到视频就自动播（与「归类」页的 S.autoplay 联动）
+  videoLoop: false,            // 视频循环播放
+  slide: false, paused: false, interval: 5000, timer: null,
+  loaded: false, loading: false, truncated: false,
+  galPage: 0,
+};
+const BROWSE_STEPS = [2, 3, 5, 8, 10, 15, 20, 30, 60];   // 幻灯片图片停留秒数可选值（默认 5s）
+const BROWSE_LIMIT = 5000;                               // 一次递归扫描的条数上限（服务端也认这个参数）
+const BROWSE_GAL_PER = 60;                               // 画廊每页格子数
+const RANDOM_HISTORY = 200;                              // 「上一个」历史深度
+let browseRun = 0;                                       // 递归扫描的轮次（防止旧结果覆盖新选择）
 
 /* ---------------- 提示 ---------------- */
 function toast(msg, kind, ms) {
@@ -471,6 +730,16 @@ function snapshot() {
   return {
     version: 1, source: S.source, targets: S.targets, del: S.del,
     filter: S.filter, autoplay: S.autoplay, autoFs: S.autoFs, sort: S.sortMode,
+    // 「浏览」页的选择也一起存（同一份配置，换设备/清缓存都还能接着看）
+    browse: {
+      dirs: B.dirs.map((d) => d.path),
+      filter: B.filter,
+      intervalSec: Math.round(B.interval / 1000),
+      autoSlide: B.autoSlide,
+      random: B.random,
+      videoAuto: B.videoAuto,
+      videoLoop: B.videoLoop,
+    },
     undo: S.undoStack.slice(-MAX_UNDO),          // 撤销栈也持久化，刷新/换设备后还能继续撤销
     updated: new Date().toISOString(),
   };
@@ -488,6 +757,26 @@ function applyConfig(c) {
   if (typeof c.autoplay === 'boolean') S.autoplay = c.autoplay;
   if (typeof c.autoFs === 'boolean') S.autoFs = c.autoFs;
   if (c.sort === 'mtime-asc' || c.sort === 'mtime-desc') S.sortMode = c.sort;
+  if (c.browse && typeof c.browse === 'object') {
+    const bs = c.browse;
+    if (Array.isArray(bs.dirs)) {
+      B.dirs = bs.dirs
+        .filter((p) => typeof p === 'string' && p.trim())
+        .slice(0, 40)
+        .map((p) => ({ path: normPath(p), name: labelOf(p) }));
+    }
+    if (['all', 'image', 'video'].includes(bs.filter)) B.filter = bs.filter;
+    const sec = Number(bs.intervalSec);
+    if (Number.isFinite(sec) && sec >= 1 && sec <= 600) B.interval = Math.round(sec) * 1000;
+    if (typeof bs.autoSlide === 'boolean') B.autoSlide = bs.autoSlide;
+    if (typeof bs.random === 'boolean') B.random = bs.random;
+    if (typeof bs.videoLoop === 'boolean') B.videoLoop = bs.videoLoop;
+    // 视频自动播放只有一个事实来源：browse.videoAuto 优先，其次才是老的顶层 autoplay
+    // （旧配置里没有 browse.videoAuto，就继续沿用 autoplay 的开关值，不改变老用户的行为）
+    if (typeof bs.videoAuto === 'boolean') B.videoAuto = bs.videoAuto;
+    else if (typeof c.autoplay === 'boolean') B.videoAuto = c.autoplay;
+    S.autoplay = B.videoAuto;                     // 「归类」页与浏览页共用同一个开关
+  }
   if (Array.isArray(c.undo)) {
     S.undoStack = c.undo
       .filter((r) => r && typeof r.backDir === 'string' && typeof r.name === 'string' && typeof r.from === 'string')
@@ -688,21 +977,25 @@ function setFilter(f) {
     + (S.files.length ? `（${S.files.length} 个）` : '（没有）'), 'ok', 1400);
 }
 
-/* 视频自动播放开关（与桌面版语义一致：只影响主图，缩略图永不自动播） */
+/* 视频自动播放开关（「归类」页与「浏览」页共用同一个值：B.videoAuto ↔ S.autoplay） */
 function updateAutoplayUI() {
   const b = $('autoplayBtn');
-  if (!b) return;
-  b.textContent = S.autoplay ? '开' : '关';
-  b.classList.toggle('on', S.autoplay);
-  b.style.borderColor = S.autoplay ? 'var(--ok)' : 'var(--line)';
-  b.style.color = S.autoplay ? 'var(--ok)' : 'var(--dim)';
+  if (b) {
+    b.textContent = S.autoplay ? '开' : '关';
+    b.classList.toggle('on', S.autoplay);
+    b.style.borderColor = S.autoplay ? 'var(--ok)' : 'var(--line)';
+    b.style.color = S.autoplay ? 'var(--ok)' : 'var(--dim)';
+  }
+  updateBrowseCfgUI();
 }
 function setAutoplay(v) {
   S.autoplay = !!v;
+  B.videoAuto = S.autoplay;
   try { localStorage.setItem(AUTOPLAY_LS, S.autoplay ? '1' : '0'); } catch(e){}
   updateAutoplayUI();
   scheduleSave();
   renderStage();                        // 立刻生效：打开就播，关闭就停在首帧
+  if (PAGE === 'browse') renderBrowse(); // 浏览页那一张也跟着播/停
   toast('视频自动播放：' + (S.autoplay ? '开' : '关'), 'ok', 1400);
 }
 
@@ -767,7 +1060,12 @@ document.addEventListener('fullscreenchange', () => {
   }
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') armAutoFs();
+  if (document.visibilityState === 'visible') {
+    armAutoFs();
+    if (PAGE === 'browse') browseArm();     // 回到前台继续幻灯片
+  } else {
+    clearTimeout(B.timer); B.timer = null;  // 后台别偷偷翻页
+  }
 });
 
 function preload() {
@@ -828,7 +1126,7 @@ function renderStage() {
   const isV = VID.has(extOf(f.name));
   const el = document.createElement(isV ? 'video' : 'img');
   el.src = isV ? f.url + '#t=0.1' : f.url;      // #t=0.1 让移动端也能画出首帧
-  if (isV) { el.controls = true; el.playsInline = true; el.preload = 'metadata'; }
+  if (isV) { el.controls = true; el.playsInline = true; el.preload = 'metadata'; el.loop = B.videoLoop; }
   const spin = $('spin'); spin.classList.add('on');
   const done = () => spin.classList.remove('on');
   el.addEventListener('load', done); el.addEventListener('loadeddata', done); el.addEventListener('error', done);
@@ -847,15 +1145,33 @@ function renderStage() {
   renderBadge(f);
 }
 
+/** 左上角信息药丸：默认只留序号（第 N / 总数），点一下才展开类型 / 大小 / 剩余。
+ *  detailOpen 在本次会话内保持 —— 展开过一次就一直展开，省得每翻一张都再点。 */
 function renderBadge(f) {
-  const b = $('badge'); b.innerHTML = '';
+  const b = $('badge'); if (!b) return;
+  b.innerHTML = '';
   if (!f) return;
+  const isV = VID.has(extOf(f.name));
+  const seq = document.createElement('button');
+  seq.type = 'button';
+  seq.className = 'seq' + (detailOpen ? ' on' : '');
+  seq.title = detailOpen ? '收起文件信息' : '展开文件类型与大小';
+  const num = document.createElement('span');
+  num.style.cssText = 'background:none;border:0;padding:0;color:inherit;font:inherit';
+  num.textContent = `第 ${S.index+1} / ${S.files.length}`;
+  const cv = document.createElement('span');
+  cv.className = 'cv'; cv.textContent = detailOpen ? '▲' : '▼';
+  seq.append(num, cv);
+  seq.onclick = (e) => { e.stopPropagation(); detailOpen = !detailOpen; renderBadge(f); };
+  b.append(seq);
+  if (!detailOpen) return;
   const add = (t) => { const s = document.createElement('span'); s.textContent = t; b.append(s); };
-  add(`第 ${S.index+1} / ${S.files.length} 张`);
-  add(`剩余 ${S.files.length - S.index}`);
+  add(isV ? '视频' : '图片');
   add(human(f.size));
-  if (VID.has(extOf(f.name))) add('视频');
+  add(`剩余 ${S.files.length - S.index}`);
+  if (S.dirs.length) add(`${S.dirs.length} 个子目录`);
 }
+let detailOpen = false;              // 序号里的明细是否展开（会话级）
 
 function renderFilm() {
   const box = $('film'); box.innerHTML = '';
@@ -1307,31 +1623,46 @@ function openPicker(mode, slot, from) {
 
 function renderPickerFoot() {
   const m = S.pick.mode;
-  $('browseTitle').textContent = m === 'batch' ? '批量勾选子目录' : m === 'source' ? '选择「待分类」目录' : m === 'del' ? '选择「丢弃」目录' : `选择槽位 ${S.pick.slot+1} 的目录`;
+  $('browseTitle').textContent = m === 'batch' ? '批量勾选子目录'
+    : m === 'bfolders' ? '浏览：选择文件夹（可多选，含子文件夹）'
+    : m === 'source' ? '选择「待分类」目录'
+    : m === 'del' ? '选择「丢弃」目录' : `选择槽位 ${S.pick.slot+1} 的目录`;
   const foot = $('bFoot');
-  if (m === 'batch') {
-    foot.innerHTML = '';
-    const all = document.createElement('button'); all.className='btn ghost'; all.textContent='全选';
-    all.onclick = () => { pickerCurrentDirs().forEach((d)=>S.pick.chosen.add(d.href)); renderPickerList(); renderPickerFoot(); };
-    const none = document.createElement('button'); none.className='btn ghost'; none.textContent='清空';
-    none.onclick = () => { S.pick.chosen.clear(); renderPickerList(); renderPickerFoot(); };
-    const add = document.createElement('button'); add.className='btn primary';
-    add.textContent = `添加到空槽位 (${S.pick.chosen.size})`;
-    add.disabled = S.pick.chosen.size === 0;
-    add.onclick = applyBatch;
-    foot.append(all, none, add);
-  } else {
-    foot.innerHTML = '';
-    const cancel = document.createElement('button'); cancel.className='btn ghost'; cancel.textContent='取消';
-    cancel.onclick = () => $('browseSheet').classList.remove('on');
-    const ok = document.createElement('button'); ok.className='btn primary'; ok.textContent='选定此目录';
-    ok.onclick = () => { commitPick(S.pick.dir); };
-    foot.append(cancel, ok);
-    if (m === 'slot') {
-      const batch = document.createElement('button'); batch.className='btn'; batch.textContent='☑ 批量';
-      batch.onclick = () => { S.pick = { mode:'batch', slot:-1, dir:S.pick.dir, chosen:new Set(), from:S.pick.from }; renderPickerFoot(); pickerLoad(S.pick.dir); };
-      foot.insertBefore(batch, ok);
+  const mk = (txt, cls, fn) => {
+    const b = document.createElement('button');
+    b.className = 'btn ' + (cls || ''); b.textContent = txt; b.onclick = fn; return b;
+  };
+  foot.innerHTML = '';
+  foot.style.flexWrap = '';
+
+  if (m === 'batch' || m === 'bfolders') {
+    const multi = m === 'bfolders';                 // bfolders：勾完直接生效，不占槽位
+    const all = mk('全选', 'ghost', () => { pickerCurrentDirs().forEach((d) => S.pick.chosen.add(d.href)); renderPickerList(); renderPickerFoot(); });
+    const none = mk('清空', 'ghost', () => { S.pick.chosen.clear(); renderPickerList(); renderPickerFoot(); });
+    foot.append(all, none);
+    if (multi) {
+      // 当前所在的整个目录也要能选（否则只能选它的子目录）
+      foot.append(mk('选当前', 'ghost', () => toggleChosen(S.pick.dir)));
+      foot.style.flexWrap = 'wrap';
     }
+    const add = document.createElement('button');
+    add.className = 'btn primary';
+    add.textContent = multi ? `完成（${S.pick.chosen.size}）` : `添加到空槽位 (${S.pick.chosen.size})`;
+    add.disabled = !multi && S.pick.chosen.size === 0;
+    add.onclick = multi ? applyBrowseDirs : applyBatch;
+    foot.append(add);
+    return;
+  }
+
+  const cancel = mk('取消', 'ghost', () => $('browseSheet').classList.remove('on'));
+  const ok = mk('选定此目录', 'primary', () => commitPick(S.pick.dir));
+  foot.append(cancel, ok);
+  if (m === 'slot') {
+    const batch = mk('☑ 批量', '', () => {
+      S.pick = { mode:'batch', slot:-1, dir:S.pick.dir, chosen:new Set(), from:S.pick.from };
+      renderPickerFoot(); pickerLoad(S.pick.dir);
+    });
+    foot.insertBefore(batch, ok);
   }
 }
 
@@ -1346,7 +1677,9 @@ async function pickerLoad(dir, fallback) {
     + `<span class="pool same">${esc(poolOf(S.pick.dir))}</span>`;
   $('bHint').innerHTML = S.pick.mode === 'batch'
     ? '勾选下面这些子目录，然后点右下角一次加入空槽位。也可以先进到更深的目录再勾。'
-    : '点一行进入该目录；也可以直接点「选它」把那个子目录选走。';
+    : S.pick.mode === 'bfolders'
+      ? '勾选要浏览的文件夹（可以勾好几个）；选中的目录会连同它的<b>子文件夹</b>一起被扫描。'
+      : '点一行进入该目录；也可以直接点「选它」把那个子目录选走。';
   const box = $('bList');
   box.innerHTML = '<div class="note">载入中…</div>';
   try {
@@ -1369,7 +1702,7 @@ async function pickerLoad(dir, fallback) {
 
 function renderPickerList() {
   const box = $('bList'); box.innerHTML = '';
-  const batch = S.pick.mode === 'batch';
+  const batch = S.pick.mode === 'batch' || S.pick.mode === 'bfolders';   // 多选：勾选框 + 点行进入
   if (!pickerDirs.length) {
     box.innerHTML = '<div class="note">这个目录下没有子目录<br>（可以点上面的 ↑ 回上一层）</div>';
     if (batch) updateBatchHint();
@@ -1421,6 +1754,11 @@ function renderPickerList() {
 }
 
 function toggleChosen(href) {
+  // 根路径是"卷列表"这个伪目录，不是真目录，选了也没法扫
+  if (S.pick.mode === 'bfolders' && normPath(href) === '/') {
+    toast('这里是卷列表，先点进某个卷里再选文件夹', 'warn', 3000);
+    return;
+  }
   S.pick.chosen.has(href) ? S.pick.chosen.delete(href) : S.pick.chosen.add(href);
   renderPickerList(); renderPickerFoot();
 }
@@ -1428,6 +1766,12 @@ function toggleChosen(href) {
 /** 批量模式：把"已选 N 个"写在提示行上，边勾边看得见 */
 function updateBatchHint() {
   const n = S.pick.chosen.size;
+  if (S.pick.mode === 'bfolders') {
+    $('bHint').innerHTML = `已选 <b style="color:#4c9aff">${n}</b> 个文件夹 —— `
+      + `点一行＝<b>进入</b>该目录，勾选请点每行<b>左边的方框</b>；`
+      + `也可以用「选当前」把正在看的这个目录一起勾上。`;
+    return;
+  }
   $('bHint').innerHTML = `已选 <b style="color:#4c9aff">${n}</b> 个 —— `
     + `点一行＝<b>进入</b>该目录，勾选请点每行<b>左边的方框</b>。`
     + (n ? ' 选好后点右下角一次加入空槽位。' : '');
@@ -1477,7 +1821,469 @@ function applyBatch() {
   refreshCounts();
 }
 
+/* ==========================================================================
+ * 「浏览」页：随机看图片 / 视频
+ * --------------------------------------------------------------------------
+ * 顶部工具栏只有四件事：切换文件夹（可多选、含子文件夹）、媒体类型筛选、
+ * 幻灯片视图、画廊视图 —— 其余一律不做。
+ * 交互语义：
+ *   · 图片：点画面 = 换下一张（随机）
+ *   · 视频：点画面 = 播放/暂停（保持原语义），上一个/下一个走播放器下方的控制条
+ *   · 幻灯片：随机播放；图片等间隔（可配，默认 5s），视频放完才切下一个
+ * ==========================================================================*/
+
+/** 递归列目录（服务端一次走完，含子文件夹）。目录不存在返回 null。 */
+async function listDeep(vpath) {
+  const r = await fetch(`${API}/list?recursive=1&limit=${BROWSE_LIMIT}&path=${enc(vpath || '/')}`,
+    { credentials:'same-origin' });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('列目录失败 HTTP ' + r.status);
+  return await r.json();
+}
+
+function browseSortRaw() {
+  B.raw.sort((a, b) => (b.mtime - a.mtime)
+    || String(a.name).localeCompare(String(b.name), 'zh', { numeric: true }));
+}
+
+/** 重算可见列表。keepCurrent=true 时尽量停在当前这张（切筛选/刷新时用）。 */
+function browseBuild(keepCurrent) {
+  const prev = (keepCurrent && B.files[B.index]) ? B.files[B.index].href : null;
+  const f = B.filter;
+  B.files = B.raw.filter((e) => f === 'all' ? true
+    : f === 'image' ? IMG.has(extOf(e.name)) : VID.has(extOf(e.name)));
+  const i = prev ? B.files.findIndex((e) => e.href === prev) : -1;
+  B.index = i >= 0 ? i : (B.files.length ? 0 : -1);
+}
+
+async function browseLoad() {
+  // 每轮加载带一个序号：扫描途中又换了文件夹时，旧的那轮结果直接丢弃，
+  // 不然先慢后快会把"新选的文件夹"显示成"上一次的结果"。
+  const run = ++browseRun;
+  B.loaded = true;
+  if (!B.dirs.length) { B.raw = []; B.files = []; B.index = -1; browseShow(); return; }
+  B.loading = true;
+  renderBrowse();
+  try {
+    const map = new Map();                       // href 去重：父目录与子目录同时被选中时不会重复
+    let truncated = false;
+    for (const d of B.dirs) {
+      let res = null;
+      try { res = await listDeep(d.path); }
+      catch (e) { toast(`「${d.name}」读取失败：${e.message}`, 'err', 4500); continue; }
+      if (!res) { toast(`「${d.name}」已经不存在了`, 'warn', 3500); continue; }
+      if (res.truncated) truncated = true;
+      for (const e of (res.entries || [])) if (!map.has(e.href)) map.set(e.href, e);
+    }
+    if (run !== browseRun) return;               // 已经被更新的一轮取代
+    B.raw = [...map.values()];
+    B.truncated = truncated;
+    browseSortRaw();
+    B.history = [];
+    browseBuild(false);
+    if (truncated) toast(`文件太多，只取了前 ${BROWSE_LIMIT} 个（少选几个文件夹试试）`, 'warn', 5000);
+  } finally {
+    if (run === browseRun) B.loading = false;
+  }
+  if (run === browseRun) browseShow();
+}
+
+/** 渲染 + 重新计时（幻灯片）。任何"换了一张"都走这里。 */
+function browseShow() {
+  renderBrowse();
+  browseArm();
+}
+
+/** 幻灯片计时：图片按间隔推进；视频不排计时器 —— 放完由 ended 事件推进。
+ *  autoSlide=false（首页设置里关掉，或点了工具栏的 ⏸）就纯手动翻，不排计时器。 */
+function browseArm() {
+  clearTimeout(B.timer); B.timer = null;
+  if (!B.autoSlide || !B.slide || B.paused || PAGE !== 'browse') return;
+  const f = B.files[B.index];
+  if (!f || VID.has(extOf(f.name))) return;
+  B.timer = setTimeout(() => { B.timer = null; browseNext(); }, Math.max(1000, B.interval));
+}
+
+function renderBrowseHead() {
+  const n = B.dirs.length;
+  const nm = $('bDirName'), pt = $('bDirPath');
+  if (nm) nm.textContent = n ? (n === 1 ? B.dirs[0].name : `${n} 个文件夹`) : '未选择文件夹';
+  if (pt) pt.textContent = n ? B.dirs.map((d) => dec(d.path)).join('、') : '点这里多选（含子文件夹）';
+}
+
+function browseEmptyHint() {
+  if (B.loading) return '<span class="big">⏳</span>正在扫描文件夹…<br><span style="color:#63707e">含子文件夹，目录多的时候要等一下</span>';
+  if (!B.dirs.length) {
+    return '<span class="big">🖼️</span>还没有选择文件夹<br>'
+      + '<span style="color:#63707e">点上面的「📂」可以一次多选，子文件夹也会一起扫</span>';
+  }
+  if (!B.raw.length) {
+    return '<span class="big">🔍</span>这些文件夹里没有图片或视频<br>'
+      + '<span style="color:#63707e">（已扫过子文件夹；以 . 开头的隐藏目录会被跳过）</span>';
+  }
+  const fname = { all:'图片或视频', image:'图片', video:'视频' }[B.filter] || '媒体';
+  return `<span class="big">🔍</span>当前筛选（仅${fname}）下没有文件<br>`
+    + `还有 <b>${B.raw.length}</b> 个其它媒体，点右上角的筛选按钮切换`;
+}
+
+function renderBrowseBadge(f) {
+  const b = $('bBadge'); if (!b) return;
+  b.innerHTML = '';
+  if (!f) return;
+  const add = (t) => { const s = document.createElement('span'); s.textContent = t; b.append(s); };
+  add(`第 ${B.index + 1} / ${B.files.length}`);
+  if (B.dirs.length > 1) add(labelOf(parentOf(f.href)));
+  add(human(f.size));
+  add(VID.has(extOf(f.name)) ? '视频' : '点击画面换下一张');
+}
+
+function renderBrowse() {
+  const st = $('bStage');
+  if (!st) return;
+  st.querySelectorAll('img,video,.playbtn').forEach((n) => n.remove());
+  st.onclick = null;
+  st.classList.remove('clickable');
+  renderBrowseHead();
+  updateBrowseChip();
+  updateSlideUI();
+  const hint = $('bHint');
+  const f = B.files[B.index];
+  $('bVbar').classList.toggle('on', !!(f && !B.loading && VID.has(extOf(f.name))));
+  if (B.loading || !f) {
+    hint.style.display = '';
+    hint.innerHTML = browseEmptyHint();
+    renderBrowseBadge(null);
+    return;
+  }
+  hint.style.display = 'none';
+  const isV = VID.has(extOf(f.name));
+  const el = document.createElement(isV ? 'video' : 'img');
+  el.src = isV ? f.url + '#t=0.1' : f.url;    // #t=0.1 让移动端也能画出首帧
+  if (isV) {
+    el.controls = true; el.playsInline = true; el.preload = 'metadata';
+    el.loop = B.videoLoop;                    // 循环播放（幻灯片模式下就不会因放完而跳走）
+    el.autoplay = B.videoAuto;                // 翻到视频就自动播；被策略拒绝时下面再兜底一次
+  }
+  const spin = $('bSpin');
+  spin.classList.add('on');
+  const done = () => spin.classList.remove('on');
+  el.addEventListener('load', done); el.addEventListener('loadeddata', done); el.addEventListener('error', done);
+  st.insertBefore(el, $('bBadge'));
+  if (isV) {
+    // 视频：点画面 = 播放/暂停（与归类页一致），不劫持点击去翻页
+    const pb = document.createElement('button');
+    pb.className = 'playbtn'; pb.type = 'button'; pb.textContent = '▶';
+    pb.setAttribute('aria-label', '播放');
+    pb.onclick = (e) => { e.stopPropagation(); el.paused ? el.play().catch(() => {}) : el.pause(); };
+    el.addEventListener('play', () => pb.classList.add('hidden'));
+    el.addEventListener('pause', () => pb.classList.remove('hidden'));
+    el.addEventListener('ended', () => {
+      pb.classList.remove('hidden');
+      if (B.autoSlide && !B.paused && !B.videoLoop) browseNext();  // 幻灯片：视频放完才切下一个
+    });
+    st.insertBefore(pb, $('bBadge'));
+    if (B.videoAuto) {
+      // 自动播放（含"随机到视频"这一种）：先原声试播，画面/声音都完整。
+      // 被浏览器策略拒绝时保留 ▶ 按钮；手动翻页的场景再退一步静音重试
+      //（静音自动播一般是允许的），幻灯片则不退 —— 否则会突然静音放起来。
+      el.play().catch(() => {
+        pb.classList.remove('hidden');
+        if (!B.autoSlide && !el.muted) {
+          el.muted = true;
+          el.play().then(() => toast('浏览器只允许静音自动播放，已静音播放', 'warn', 3200)).catch(() => {});
+        }
+      });
+    }
+  } else {
+    // 图片：点画面 = 换下一张（随机）
+    st.classList.add('clickable');
+    st.onclick = () => browseNext();
+  }
+  renderBrowseBadge(f);
+}
+
+/** 幻灯片顺序：随机时在"除当前这张以外"的候选里等概率挑一个（避免连续两次同一张）；
+ *  关掉就是老老实实往后走，到末尾回到第一张。 */
+function nextIndex(cur) {
+  const n = B.files.length;
+  if (n <= 0) return -1;
+  if (!B.random) return cur < 0 || cur >= n - 1 ? 0 : cur + 1;
+  if (n === 1) return 0;
+  if (cur < 0 || cur >= n) return Math.floor(Math.random() * n);
+  const r = Math.floor(Math.random() * (n - 1));
+  return r >= cur ? r + 1 : r;
+}
+
+function browseNext() {
+  if (!B.files.length) { toast('还没有可浏览的图片或视频', 'warn'); return; }
+  const cur = B.files[B.index];
+  if (cur) { B.history.push(cur.href); if (B.history.length > RANDOM_HISTORY) B.history.shift(); }
+  B.index = nextIndex(B.index);
+  browseShow();
+}
+
+function browsePrev() {
+  if (!B.files.length) { toast('还没有可浏览的图片或视频', 'warn'); return; }
+  while (B.history.length) {
+    const href = B.history.pop();
+    const i = B.files.findIndex((e) => e.href === href);
+    if (i >= 0) { B.index = i; browseShow(); return; }
+  }
+  // 历史空了：随机模式下随机换一张；顺序模式下就往前退一张
+  B.index = B.random ? nextIndex(B.index) : (B.index > 0 ? B.index - 1 : B.files.length - 1);
+  browseShow();
+  if (B.random) toast('没有更早的浏览记录了，随机换一张', '', 1600);
+}
+
+function browseGoto(i) {
+  if (i < 0 || i >= B.files.length) return;
+  const cur = B.files[B.index];
+  if (cur) { B.history.push(cur.href); if (B.history.length > RANDOM_HISTORY) B.history.shift(); }
+  B.index = i;
+  browseShow();
+}
+
+function updateBrowseChip() {
+  const label = { all:'图+视', image:'仅图片', video:'仅视频' }[B.filter] || '图+视';
+  const c = $('bFilter');
+  if (c) { c.textContent = label; c.dataset.f = B.filter; }
+}
+
+function updateSlideUI() {
+  const b = $('bSlide');
+  if (b) {
+    // 工具栏这个键＝"自动翻页"的总开关（首页 ⚙ 里那一项的快捷开关）
+    const on = !!(B.autoSlide && B.slide);
+    b.textContent = on ? '⏸' : '▶';
+    b.title = on ? '幻灯片播放中（点一下停止）'
+      : B.autoSlide ? '幻灯片已停止（点一下开始）' : '幻灯片自动播放已在 ⚙ 里关掉';
+    b.style.borderColor = on ? 'var(--acc)' : 'var(--line)';
+    b.style.color = on ? 'var(--acc)' : 'var(--fg)';
+  }
+  const bar = $('bSlideBar');
+  if (bar) bar.classList.toggle('on', !!B.slide);
+  const pb = $('bSlidePause');
+  if (pb) pb.textContent = B.paused ? '▶ 继续' : '⏸ 暂停';
+  const v = $('bIntVal');
+  if (v) v.textContent = `${Math.round(B.interval / 1000)}s`;
+}
+
+function setBrowseFilter(f) {
+  if (!['all','image','video'].includes(f)) f = 'all';
+  B.filter = f;
+  browseBuild(true);
+  browseShow();
+  scheduleSave();
+  toast('媒体类型：' + ({all:'图片 + 视频', image:'仅图片', video:'仅视频'}[f])
+    + (B.files.length ? `（${B.files.length} 个）` : '（没有）'), 'ok', 1400);
+}
+
+function setSlide(on) {
+  B.slide = !!on;
+  B.autoSlide = B.slide;                // 工具栏这个键＝"幻灯片自动播放"的总开关，与 ⚙ 里那一项同一个值
+  B.paused = false;
+  if (!B.slide) {
+    clearTimeout(B.timer); B.timer = null;
+    const v = $('bStage') ? $('bStage').querySelector('video') : null;
+    if (v) v.pause();
+  }
+  scheduleSave();
+  updateBrowseCfgUI();
+  browseShow();
+  toast(B.slide
+    ? (B.random ? '幻灯片开始：随机播放' : '幻灯片开始：按顺序播放')
+      + `（图片每 ${Math.round(B.interval / 1000)} 秒一张，视频放完再换）`
+    : '幻灯片已停止（点画面/方向键仍可手动翻）', 'ok', 2800);
+}
+
+function setSlidePaused(p) {
+  B.paused = !!p;
+  const v = $('bStage') ? $('bStage').querySelector('video') : null;
+  if (B.paused) { clearTimeout(B.timer); B.timer = null; if (v) v.pause(); }
+  else if (v) v.play().catch(() => {});
+  updateSlideUI();
+  if (!B.paused) browseArm();
+}
+
+/** 当前间隔在可选值表里的下标（服务端存过非标准值时就近归位）。 */
+function stepIndexOf(sec) {
+  const i = BROWSE_STEPS.indexOf(sec);
+  if (i >= 0) return i;
+  return BROWSE_STEPS.reduce((best, v, k) =>
+    Math.abs(v - sec) < Math.abs(BROWSE_STEPS[best] - sec) ? k : best, 0);
+}
+
+function stepInterval(delta) {
+  const cur = Math.round(B.interval / 1000);
+  const j = Math.min(BROWSE_STEPS.length - 1, Math.max(0, stepIndexOf(cur) + delta));
+  B.interval = BROWSE_STEPS[j] * 1000;
+  scheduleSave();
+  updateSlideUI();
+  updateBrowseCfgUI();
+  if (B.slide) browseArm();                     // 正在播就按新间隔立刻重新计时
+  toast(`图片间隔：${BROWSE_STEPS[j]} 秒`, '', 1200);
+}
+
+/* ==========================================================================
+ * 首页 ⚙「浏览设置」：幻灯片（自动播放 / 间隔 / 随机）与视频（自动播放 / 循环）
+ * --------------------------------------------------------------------------
+ * 值都存在服务端配置的 browse.* 里；这里的按钮与浏览页工具栏、归类页 ⚙ 里的
+ * 那几个开关是**同一个值的不同入口**，改一处处处同步（updateBrowseCfgUI 负责刷新按钮）。
+ * ==========================================================================*/
+const yn = (v) => (v ? '开' : '关');
+/** 把一个开关键刷成"开/关"的样子（绿＝开，灰＝关）。 */
+function paintToggle(el, on) {
+  if (!el) return;
+  el.textContent = yn(on);
+  el.style.borderColor = on ? 'var(--ok)' : 'var(--line)';
+  el.style.color = on ? 'var(--ok)' : 'var(--dim)';
+}
+function updateBrowseCfgUI() {
+  paintToggle($('bCfgAuto'), B.autoSlide);
+  paintToggle($('bCfgRand'), B.random);
+  paintToggle($('bCfgVideo'), B.videoAuto);
+  paintToggle($('bCfgLoop'), B.videoLoop);
+  const v = $('bCfgIntVal');
+  if (v) v.textContent = `${Math.round(B.interval / 1000)}s`;
+}
+function setAutoSlide(v) {
+  B.autoSlide = !!v;
+  B.slide = B.autoSlide;
+  B.paused = false;
+  scheduleSave();
+  updateBrowseCfgUI();
+  updateSlideUI();
+  if (B.autoSlide) { if (PAGE === 'browse') browseShow(); }   // 已开：立刻按新设置开始播
+  else browseArm();                                          // 已关：清掉计时器（browseArm 会直接返回）
+  toast('幻灯片自动播放：' + yn(B.autoSlide), 'ok', 1400);
+}
+function setRandom(v) {
+  B.random = !!v;
+  scheduleSave();
+  updateBrowseCfgUI();
+  toast(B.random ? '幻灯片：随机播放' : '幻灯片：按列表顺序播放', 'ok', 1600);
+}
+function setVideoLoop(v) {
+  B.videoLoop = !!v;
+  scheduleSave();
+  updateBrowseCfgUI();
+  const el = $('bStage') ? $('bStage').querySelector('video') : null;
+  if (el) el.loop = B.videoLoop;                    // 立刻对正在播的那个生效
+  const el2 = $('stage') ? $('stage').querySelector('video') : null;
+  if (el2) el2.loop = B.videoLoop;
+  toast('视频循环：' + yn(B.videoLoop), 'ok', 1400);
+}
+function stepIntervalCfg(delta) {
+  stepInterval(delta);
+  updateBrowseCfgUI();
+  updateSlideUI();
+}
+
+/* ---------------- 浏览页的画廊（分页栅格） ---------------- */
+function browseOpenGallery() {
+  if (!B.files.length) { toast('还没有可浏览的图片或视频', 'warn'); return; }
+  B.galPage = Math.floor(Math.max(0, B.index) / BROWSE_GAL_PER);
+  $('bGalTitle').textContent = `画廊 · ${B.files.length} 个`;
+  $('bGalSheet').classList.add('on');
+  renderBrowseGallery();
+}
+
+function renderBrowseGallery() {
+  const box = $('bGalBox'); box.innerHTML = '';
+  const pages = Math.max(1, Math.ceil(B.files.length / BROWSE_GAL_PER));
+  B.galPage = Math.min(Math.max(0, B.galPage), pages - 1);
+  const start = B.galPage * BROWSE_GAL_PER;
+  B.files.slice(start, start + BROWSE_GAL_PER).forEach((f, k) => {
+    const gi = start + k;
+    const isV = VID.has(extOf(f.name));
+    const b = document.createElement('button');
+    b.className = 'gcell' + (gi === B.index ? ' sel' : '');
+    const folder = B.dirs.length > 1 ? `<span class="f">${esc(labelOf(parentOf(f.href)))}</span>` : '';
+    b.innerHTML = (isV
+        ? `<video src="${f.url}#t=0.1" preload="metadata" muted playsinline></video><span class="v">▶</span>`
+        : `<img loading="lazy" src="${f.url}" alt="">`)
+      + folder + `<span class="d">${gi + 1}</span>`;
+    b.onclick = () => { $('bGalSheet').classList.remove('on'); browseGoto(gi); };
+    box.append(b);
+  });
+  $('bGalPage').textContent = `${B.galPage + 1} / ${pages}`;
+  $('bGalPrev').disabled = B.galPage <= 0;
+  $('bGalNext').disabled = B.galPage >= pages - 1;
+}
+
+function browseGalStep(d) {
+  B.galPage += d;
+  renderBrowseGallery();
+  const body = $('bGalSheet').querySelector('.body');
+  if (body) body.scrollTop = 0;
+}
+
+/* ---------------- 浏览页的文件夹多选（复用目录选择器） ---------------- */
+function openBrowsePicker() {
+  const start = B.dirs.length ? parentOf(B.dirs[0].path) : (S.lastPickDir || '/');
+  S.pick = { mode:'bfolders', slot:-1, dir: start, chosen: new Set(B.dirs.map((d) => normPath(d.path))), from:'browse' };
+  $('browseSheet').classList.add('on');
+  renderPickerFoot();
+  pickerLoad(start);
+}
+
+async function applyBrowseDirs() {
+  const chosen = Array.from(S.pick.chosen).map((p) => normPath(p)).filter((p) => p !== '/');
+  B.dirs = chosen.map((p) => ({ path: p, name: labelOf(p) }));
+  $('browseSheet').classList.remove('on');
+  scheduleSave();
+  B.history = [];
+  await browseLoad();
+  toast(B.dirs.length ? `已选 ${B.dirs.length} 个文件夹（含子文件夹）` : '已清空文件夹选择', 'ok', 2400);
+}
+
+/** 进入浏览页 / 离开浏览页 */
+function browseEnter() {
+  if (!B.loaded) browseLoad().catch((e) => toast('扫描失败：' + (e && e.message), 'err', 4500));
+  else browseShow();
+}
+function browseStop() {
+  clearTimeout(B.timer); B.timer = null;
+  const v = $('bStage') ? $('bStage').querySelector('video') : null;
+  if (v) v.pause();
+}
+
 /* ---------------- 事件 ---------------- */
+/* 菜单与三个功能页的回菜单按钮 */
+document.querySelectorAll('.mcard[data-page]').forEach((b) => { b.onclick = () => navTo(b.dataset.page); });
+for (const id of ['catMenu', 'browseMenu', 'dedupeMenu', 'dedupeBack']) {
+  const b = $(id);
+  if (b) b.onclick = goMenu;
+}
+/* 浏览页工具栏：切换文件夹 / 筛选 / 幻灯片 / 画廊 */
+$('bDirBtn').onclick = openBrowsePicker;
+$('bFilter').onclick = () => setBrowseFilter(B.filter === 'all' ? 'image' : B.filter === 'image' ? 'video' : 'all');
+$('bSlide').onclick = () => setSlide(!B.slide);
+$('bGallery').onclick = browseOpenGallery;
+$('bPrev').onclick = browsePrev;
+$('bNext').onclick = browseNext;
+$('bSlidePause').onclick = () => setSlidePaused(!B.paused);
+$('bIntDown').onclick = () => stepInterval(-1);
+$('bIntUp').onclick = () => stepInterval(1);
+$('bGalPrev').onclick = () => browseGalStep(-1);
+$('bGalNext').onclick = () => browseGalStep(1);
+
+/* 首页 ⚙「浏览设置」 */
+$('menuCfg').onclick = () => { updateBrowseCfgUI(); $('bCfgSheet').classList.add('on'); };
+$('bCfgAuto').onclick = () => setAutoSlide(!B.autoSlide);
+$('bCfgRand').onclick = () => setRandom(!B.random);
+$('bCfgVideo').onclick = () => setAutoplay(!S.autoplay);   // 与归类页、浏览页共用同一个值
+$('bCfgLoop').onclick = () => setVideoLoop(!B.videoLoop);
+$('bCfgIntDown').onclick = () => stepIntervalCfg(-1);
+$('bCfgIntUp').onclick = () => stepIntervalCfg(1);
+$('bCfgIntVal').onclick = () => {                          // 点数字＝在可选值里循环，省得一直点
+  const n = BROWSE_STEPS.length;
+  const i = stepIndexOf(Math.round(B.interval / 1000));
+  B.interval = BROWSE_STEPS[(i + 1) % n] * 1000;
+  scheduleSave(); updateBrowseCfgUI(); updateSlideUI(); if (B.slide) browseArm();
+  toast(`图片间隔：${Math.round(B.interval / 1000)} 秒`, '', 1200);
+};
+
 $('srcBtn').onclick = () => openPicker('source', -1);
 $('filterChip').onclick = () => setFilter(S.filter === 'all' ? 'image' : S.filter === 'image' ? 'video' : 'all');
 ['all','image','video'].forEach((k) => { const b = $('filter_' + k); if (b) b.onclick = () => setFilter(k); });
@@ -1558,8 +2364,8 @@ $('bReload').onclick = () => pickerLoad(S.pick.dir);
 document.addEventListener('keydown', (e) => {
   const on = (id) => $(id).classList.contains('on');
   // 任何面板打开时：Esc 关闭，其余按键一律不响应。
-  // ★ 必须包含 gridSheet —— 之前漏了它，图集开着时按 1-9 会真的把文件移走。
-  if (on('gridSheet') || on('browseSheet') || on('setupSheet')) {
+  // ★ 必须包含 gridSheet / bGalSheet / bCfgSheet —— 之前漏了图集，开着时按 1-9 会真的把文件移走。
+  if (on('gridSheet') || on('bGalSheet') || on('bCfgSheet') || on('browseSheet') || on('setupSheet')) {
     if (e.key === 'Escape') {
       e.preventDefault();
       if (on('browseSheet')) {
@@ -1567,10 +2373,27 @@ document.addEventListener('keydown', (e) => {
         if (S.pick.from === 'setup') $('setupSheet').classList.add('on');
       } else if (on('gridSheet')) {
         $('gridSheet').classList.remove('on');
+      } else if (on('bGalSheet')) {
+        $('bGalSheet').classList.remove('on');
+      } else if (on('bCfgSheet')) {
+        $('bCfgSheet').classList.remove('on');
       } else if (on('setupSheet')) {
         $('setupSheet').classList.remove('on');
       }
     }
+    return;
+  }
+  // 浏览页：← → 切上一张/下一张；空格＝下一张；Esc 回菜单
+  if (PAGE === 'browse') {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); browseNext(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); browsePrev(); }
+    else if (e.key === 'Escape') { e.preventDefault(); goMenu(); }
+    return;
+  }
+  // 菜单页：空格＝开始/停止幻灯片（去重页没有键盘操作；Esc 一律回菜单）
+  if (PAGE !== 'categorize') {
+    if (PAGE === 'menu' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); setAutoSlide(!B.autoSlide); }
+    else if (e.key === 'Escape') { e.preventDefault(); goMenu(); }
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }   // metaKey 兼顾 macOS
@@ -1585,6 +2408,7 @@ document.addEventListener('keydown', (e) => {
   try { applyConfig(JSON.parse(localStorage.getItem(CFG_LS) || 'null')); } catch(e){}
   try { const lf = localStorage.getItem(FILTER_LS); if (lf) S.filter = lf; } catch(e){}
   try { if (localStorage.getItem(AUTOPLAY_LS) === '0') S.autoplay = false; } catch(e){}
+  B.videoAuto = S.autoplay;     // 浏览页的视频自动播放与它同源（服务端配置随后说了算）
   try { if (localStorage.getItem(AUTOFS_LS) === '1') S.autoFs = true; } catch(e){}
   try { const ls = localStorage.getItem(SORT_LS); if (ls) S.sortMode = ls; } catch(e){}
   buildSlots();                 // 20 个槽位只创建一次，后续原地更新（滚动位置才不会跳）
@@ -1592,11 +2416,20 @@ document.addEventListener('keydown', (e) => {
   updateAutoplayUI();
   updateSortUI();
   updateFsUI();
+  updateBrowseChip();
+  updateSlideUI();
+  updateBrowseCfgUI();
+  renderBrowseHead();
   renderSlots(); renderHeader();
   await loadConfig();
   renderSlots(); renderHeader();
+  updateAutoplayUI();           // 服务端配置说了算：把两个页面的开关一起刷成最终值
+  updateSlideUI();
+  updateBrowseCfgUI();
+  renderStage();
   const start = (S.source && S.source.path) || ROUTE + '/';
   await openSource(start);
+  showPage(pageFromHash());     // 首页＝菜单；直接开 #/browse 也能落在浏览页
   armAutoFs();          // 开了自动全屏的话：等用户进入页面后的第一次点按
   refreshCounts();
 })();
