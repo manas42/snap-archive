@@ -39,6 +39,7 @@ docker/
   src/impl.mjs          ★ 全部业务：list / move / rmdir / config / media + 路径安全
   index.html            页面（由 mobile/index.html 派生，网络层换成 /api/*）
   make-test-corpus.mjs  生成测试素材（纯 Node，多格式/中文名/同名冲突/分页/假视频）
+  lint.mjs              静态接线检查（no-undef）：拦住"引用了不存在的标识符"这类漏改
   test-api.mjs          服务端行为测试（56 条断言，不需要浏览器）
   test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，74 条断言）
 ```
@@ -193,9 +194,15 @@ SNAP_ROOTS = "photos=/data/photos;targets=/data/targets"
 ```bash
 SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
   SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
+node docker/lint.mjs         # 静态接线检查（不需要服务在跑，秒级）
 node docker/test-api.mjs     # 服务端：56 条断言
 node docker/test-ui.mjs      # 前端：74 条断言（需要 jsdom，见下）
 ```
+
+> **改完前端先跑 `node docker/lint.mjs`**：它不需要运行任何东西，就能发现"引用了不存在的
+> 标识符"这类漏改。这个项目已经栽过两次（`DIR` 让页面启动即白屏、`srcPool` 让设置面板一点就炸），
+> 而这类问题语法合法、服务端测试也照过，只有真跑到那一行才炸。harness 在容器里改完 `index.html`
+> 后跑一遍这个，再让你刷新，基本不会再出这种事。
 
 > 运行时兼容性：已在 **Node 22.22.2**（与容器 `node:22-bookworm` 同代）和 Node 26 上分别跑过，
 > 服务端与前端都是全绿 —— 免得等部署到 NAS 才发现版本差异。
@@ -222,8 +229,9 @@ Range 206、ETag/304 条件请求、同名改名不覆盖、`noRename` 冲突中
 > 这一类测试抓得到 API 测试与 `node --check` 都抓不到的 bug —— 例如"启动时引用了重构中被删掉的
 > 标识符"，语法完全合法、接口全部正常，但页面一打开就是白的。
 
-jsdom 是**开发依赖**（`npm i -D jsdom`），部署时不需要：服务端本身零依赖，`node server.mjs` 直接跑。
-若不想在本目录装，可在别处装好后用 `SNAP_JSDOM=/path/to/jsdom/lib/api.js node docker/test-ui.mjs`。
+jsdom / eslint / globals 都是**开发依赖**（在 `docker/` 下 `npm i` 一次即可），部署时不需要：
+服务端本身零依赖，`node server.mjs` 直接跑。不想在本目录装的话，可以在别处装好后用
+`SNAP_JSDOM=… node test-ui.mjs`、`SNAP_ESLINT=… SNAP_GLOBALS=… node lint.mjs` 指过去。
 
 > 目录 `docs/` 与 `tools/` 不入库（含 NAS 私有信息）；`tools/slice/` 是同一路线的只读验证原型，
 > 其中 `safeResolve` / `realWithinRoot` 的路径校验思路被本版沿用。
