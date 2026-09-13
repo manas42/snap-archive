@@ -11,20 +11,25 @@
  *   npm i -D jsdom            # 或在任意目录装好后用 SNAP_JSDOM 指过去
  *
  * 用法：
- *   python3 docker/make-test-corpus.py
  *   SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
  *     SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
  *   node docker/test-ui.mjs
+ *
+ * 素材在开跑前自动重建（见 make-test-corpus.mjs），所以与 test-api.mjs 的执行顺序无关。
  */
 
-import { readFile, mkdir, rm, stat } from 'node:fs/promises'
+import { readFile, mkdir, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { makeCorpus } from './make-test-corpus.mjs'
 
 const INDEX = path.join(import.meta.dirname, 'index.html')
 const BASE = process.env.BASE || 'http://127.0.0.1:8005'
 const ROOT = process.env.SNAP_TEST_ROOT || '/tmp/snap-test'
 const SRC_DIR = path.join(ROOT, '待分类')
 const DST_DIR = path.join(ROOT, '目标A')
+
+// 自己重建一份干净素材 —— 两个测试互不依赖对方的残留状态
+makeCorpus(ROOT)
 
 /** 解析 jsdom：优先显式指定的路径，其次常规解析，最后回退到本机临时安装位置。 */
 async function loadJsdom() {

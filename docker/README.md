@@ -38,7 +38,7 @@ docker/
   src/routes.mjs        路由前缀的单一来源（改前缀只改这里）
   src/impl.mjs          ★ 全部业务：list / move / rmdir / config / media + 路径安全
   index.html            页面（由 mobile/index.html 派生，网络层换成 /api/*）
-  make-test-corpus.py   生成测试素材（多格式/中文名/同名冲突/分页/假视频）
+  make-test-corpus.mjs  生成测试素材（纯 Node，多格式/中文名/同名冲突/分页/假视频）
   test-api.mjs          服务端行为测试（49 条断言，不需要浏览器）
   test-ui.mjs           前端交互测试（无头浏览器跑真实 index.html，48 条断言）
 ```
@@ -188,12 +188,14 @@ SNAP_ROOTS = "photos=/data/photos;targets=/data/targets"
 ## 本机自测（不需要 NAS）
 
 ```bash
-python3 docker/make-test-corpus.py
 SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
   SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs &
 node docker/test-api.mjs     # 服务端：49 条断言
 node docker/test-ui.mjs      # 前端：48 条断言（需要 jsdom，见下）
 ```
+
+素材由两个测试**各自在开跑前重建**，所以先跑哪个都行、也不会互相污染
+（想单独造素材：`node docker/make-test-corpus.mjs`）。
 
 **服务端**（`test-api.mjs`）覆盖：中文+空格文件名、`kind` 分类、`..` 与 `..%2f` 穿越、软链逃逸、
 Range 206、同名改名不覆盖、`noRename` 冲突中止且源毫发无损、非空目录拒删、卷根拒删。

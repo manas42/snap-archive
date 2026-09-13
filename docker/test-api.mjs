@@ -1,20 +1,24 @@
 /**
  * Snap Archive · 服务端 API 行为测试（不需要浏览器）。
  *
- *   python3 docker/make-test-corpus.py                   # 1) 生成素材
  *   SNAP_ROOTS="photos=/tmp/snap-test/待分类;store=/tmp/snap-test" \
- *     SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs   # 2) 起服务
- *   node docker/test-api.mjs                             # 3) 跑断言
+ *     SNAP_CONFIG_FILE=/tmp/snap-config.json PORT=8005 node docker/server.mjs
+ *   node docker/test-api.mjs
  *
+ * 素材在开跑前自动重建（见 make-test-corpus.mjs），所以与 test-ui.mjs 的执行顺序无关。
  * 换素材根目录：SNAP_TEST_ROOT=/path/to/corpus node docker/test-api.mjs
  * 换服务地址：  BASE=http://127.0.0.1:9000 node docker/test-api.mjs
  */
 
 import http from 'node:http'
+import { makeCorpus } from './make-test-corpus.mjs'
 
 const ROOT = process.env.SNAP_TEST_ROOT || '/tmp/snap-test'
 const BASE = process.env.BASE || 'http://127.0.0.1:8005'
 const PORT = Number(new URL(BASE).port || 80)
+
+// 自己重建一份干净素材 —— 两个测试互不依赖对方的残留状态
+makeCorpus(ROOT)
 
 let pass = 0, fail = 0
 const ok = (cond, label, extra) => {
